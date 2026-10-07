@@ -1,36 +1,30 @@
-import { Engine, Scene, Vector3, HemisphericLight, DirectionalLight, MeshBuilder, StandardMaterial, Color3, Color4, ShadowGenerator } from '@babylonjs/core';
+import { Engine, Scene, Color3, Color4, Vector3, HemisphericLight, DirectionalLight, ShadowGenerator } from '@babylonjs/core';
 import './style.css';
 import { showHomeScreen } from './home';
 import { createPlayer } from './player';
-import { createTerrain } from './terrain';
-
-const canvas = document.querySelector<HTMLCanvasElement>('#game')!;
-const engine = new Engine(canvas, true);
-const scene = new Scene(engine);
-scene.clearColor = new Color4(0.57, 0.66, 0.72, 1);
-scene.collisionsEnabled = true;
-scene.fogMode = Scene.FOGMODE_EXP2;
-scene.fogColor = new Color3(0.57, 0.66, 0.72);
-scene.fogDensity = 0.00065;
-const ambient = new HemisphericLight('sky', new Vector3(0, 1, 0), scene);
-ambient.intensity = 0.65;
-const sun = new DirectionalLight('sun', new Vector3(-1, -2, 1), scene);
-sun.position = new Vector3(20, 30, -20); sun.intensity = 1.1;
-const shadows = new ShadowGenerator(1024, sun);
-shadows.useBlurExponentialShadowMap = true;
-createTerrain(scene);
-const concrete = new StandardMaterial('concrete', scene);
-concrete.diffuseColor = new Color3(0.55, 0.52, 0.46); concrete.specularColor = Color3.Black();
-function wall(name: string, x: number, z: number, width: number, depth: number) {
-  const mesh = MeshBuilder.CreateBox(name, { width, height: 3, depth }, scene);
-  mesh.position.set(x, 1.5, z); mesh.material = concrete; mesh.checkCollisions = true;
-  mesh.receiveShadows = true; shadows.addShadowCaster(mesh);
-}
-wall('back', 0, 8, 8, 0.3); wall('left', -4, 4, 0.3, 8); wall('right', 4, 4, 0.3, 8);
-wall('front-left', -2.75, 0, 2.5, 0.3); wall('front-right', 2.75, 0, 2.5, 0.3);
-const player = createPlayer(scene, canvas);
-const hint = document.getElementById('hint');
-if (hint) hint.textContent = 'WASD: move · Shift: sprint · Space: jump · Mouse: look · Esc: release mouse';
-showHomeScreen(() => player.start());
-engine.runRenderLoop(() => scene.render());
-window.addEventListener('resize', () => engine.resize());
+import { buildForest } from './forest';
+const canvas=document.querySelector<HTMLCanvasElement>('#game')!;
+const engine=new Engine(canvas,true);
+engine.setHardwareScalingLevel(Math.max(1,window.devicePixelRatio/1.5));
+const scene=new Scene(engine);
+scene.clearColor=new Color4(0.60,0.68,0.69,1);scene.collisionsEnabled=true;
+scene.fogMode=Scene.FOGMODE_EXP2;scene.fogColor=new Color3(0.60,0.68,0.69);scene.fogDensity=0.006;
+const sky=new HemisphericLight('sky',Vector3.Up(),scene);sky.intensity=0.7;
+sky.diffuse=new Color3(0.86,0.93,1);sky.groundColor=new Color3(0.28,0.25,0.18);
+const sun=new DirectionalLight('sun',new Vector3(-0.6,-1,0.4),scene);
+sun.position=new Vector3(35,55,-25);sun.intensity=1.2;sun.diffuse=new Color3(1,0.91,0.77);
+sun.shadowMinZ=1;sun.shadowMaxZ=180;
+const shadows=new ShadowGenerator(1024,sun);shadows.usePercentageCloserFiltering=true;shadows.bias=0.002;
+buildForest(scene,shadows);
+const player=createPlayer(scene,canvas);
+const hint=document.getElementById('hint');
+if(hint)hint.textContent='WASD: move · Shift: sprint · Space: jump · Esc: release mouse';
+const stats=document.createElement('div');
+stats.style.cssText='position:fixed;top:12px;right:12px;z-index:5;color:#eef2df;background:#101810aa;padding:6px 9px;border-radius:3px;font:12px monospace;pointer-events:none';
+document.body.appendChild(stats);
+let elapsed=0;
+scene.onAfterRenderObservable.add(()=>{
+  elapsed+=engine.getDeltaTime();if(elapsed>500){stats.textContent=Math.round(engine.getFps())+' FPS · forest scene';elapsed=0;}
+});
+showHomeScreen(()=>player.start());
+engine.runRenderLoop(()=>scene.render());window.addEventListener('resize',()=>engine.resize());
