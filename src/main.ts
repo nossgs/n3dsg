@@ -1,4 +1,5 @@
 import './style.css';
+import { createCombat } from './combat';
 
 import {
   Engine,
@@ -180,192 +181,15 @@ try {
   const maxPitch = 1.35;
   const thirdPersonDistance = 3.5;
 
-  function updateViewLabel(): void {
-    viewLabel.textContent = thirdPerson
-      ? 'Third person'
-      : 'First person';
-  }
-
-  function pause(message: string): void {
-    paused = true;
-    keys.clear();
-
-    pauseMessage.textContent = message;
-    pauseScreen.hidden = false;
-    crosshair.hidden = true;
-
-    if (document.pointerLockElement === canvas) {
-      document.exitPointerLock();
-    }
-  }
-
-  async function requestPlay(): Promise<void> {
-    pauseMessage.textContent = 'Requesting mouse control…';
-
-    try {
-      await canvas.requestPointerLock();
-    } catch (error) {
-      pauseMessage.textContent =
-        'Mouse control was not granted. Click Play to try again.';
-      console.warn(error);
-    }
-  }
-
-  playButton.addEventListener('click', () => {
-    void requestPlay();
-  });
-
-  document.addEventListener('pointerlockchange', () => {
-    if (document.pointerLockElement === canvas) {
-      paused = false;
-      keys.clear();
-      pauseScreen.hidden = true;
-      crosshair.hidden = false;
-    } else {
-      pause('Paused. Click Play to resume.');
-    }
-  });
-
-  document.addEventListener('pointerlockerror', () => {
-    pause('Mouse control was not granted. Click Play to try again.');
-  });
-
-  window.addEventListener('blur', () => {
-    pause('Paused because the game lost focus.');
-  });
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-      pause('Paused because the game was hidden.');
-    }
-  });
-
-  window.addEventListener('keydown', event => {
-    if (event.code === 'Escape') {
-      pause('Paused. Click Play to resume.');
-      return;
-    }
-
-    if (paused) return;
-
-    if (
-      ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'ShiftRight', 'KeyV']
-        .includes(event.code)
-    ) {
-      event.preventDefault();
-    }
-
-    keys.add(event.code);
-
-    if (event.code === 'KeyV' && !event.repeat) {
-      thirdPerson = !thirdPerson;
-      updateViewLabel();
-    }
-  });
-
-  window.addEventListener('keyup', event => {
-    keys.delete(event.code);
-  });
-
-  document.addEventListener('mousemove', event => {
-    if (paused || document.pointerLockElement !== canvas) return;
-
-    yaw += event.movementX * mouseSensitivity;
-    pitch += event.movementY * mouseSensitivity;
-    pitch = Math.max(-maxPitch, Math.min(maxPitch, pitch));
-  });
-
-  function updatePlayer(dt: number): void {
-    const forward = new Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-    const right = new Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-
-    const movement = Vector3.Zero();
-
-    if (keys.has('KeyW')) movement.addInPlace(forward);
-    if (keys.has('KeyS')) movement.subtractInPlace(forward);
-    if (keys.has('KeyD')) movement.addInPlace(right);
-    if (keys.has('KeyA')) movement.subtractInPlace(right);
-
-    if (movement.lengthSquared() > 0) {
-      movement.normalize();
-    }
-
-    const sprinting =
-      keys.has('ShiftLeft') || keys.has('ShiftRight');
-
-    movement.scaleInPlace(
-      (sprinting ? sprintSpeed : walkSpeed) * dt,
-    );
-
-    verticalVelocity = Math.max(
-      verticalVelocity - gravity * dt,
-      -30,
-    );
-
-    movement.y = verticalVelocity * dt;
-
-    const previousY = body.position.y;
-    body.moveWithCollisions(movement);
-
-    // Downward movement blocked by ground or another surface.
-    if (
-      verticalVelocity < 0 &&
-      Math.abs(body.position.y - previousY) < 0.0001
-    ) {
-      verticalVelocity = 0;
-    }
-
-    body.rotation.y = yaw;
-  }
-
-  function updateCamera(): void {
-    const eye = body.position.add(new Vector3(0, 0.75, 0));
-
-    const direction = new Vector3(
-      Math.sin(yaw) * Math.cos(pitch),
-      -Math.sin(pitch),
-      Math.cos(yaw) * Math.cos(pitch),
-    );
-
-    let cameraPosition = eye.clone();
-
-    if (thirdPerson) {
-      const desiredPosition = eye
-        .subtract(direction.scale(thirdPersonDistance))
-        .add(new Vector3(0, 0.25, 0));
-
-      const offset = desiredPosition.subtract(eye);
-      const distance = offset.length();
-      const rayDirection = offset.scale(1 / distance);
-
-      const hit = scene.pickWithRay(
-        new Ray(eye, rayDirection, distance),
-        mesh => mesh.checkCollisions && mesh !== body,
-      );
-
-      const allowedDistance =
-        hit?.hit
-          ? Math.max(0, hit.distance - 0.25)
-          : distance;
-
-      cameraPosition = eye.add(
-        rayDirection.scale(allowedDistance),
-      );
-
-      // Avoid filling the view with the body when pushed close.
-      const showBody = allowedDistance > 0.8;
-      body.isVisible = showBody;
-      marker.isVisible = showBody;
-    } else {
-      body.isVisible = false;
-      marker.isVisible = false;
-    }
-
-    camera.position.copyFrom(cameraPosition);
-    camera.setTarget(
-      cameraPosition.add(direction.scale(20)),
-    );
-  }
+  const combat = createCombat(
+    scene,
+    camera,
+    body,
+    () => paused,
+    amount => {
+      pitch = Math.max(-maxPitch, pitch - amount);
+    },
+  );
 
   updateViewLabel();
   updateCamera();
@@ -378,6 +202,7 @@ try {
     }
 
     updateCamera();
+    combat.update(dt);
     scene.render();
   });
 
