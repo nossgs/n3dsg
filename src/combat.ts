@@ -3,8 +3,15 @@ import {
   Color3, Vector3, Ray,
 } from '@babylonjs/core';
 
-type Magazine = { id: number; rounds: number; capacity: number };
-type Projectile = { position: Vector3; velocity: Vector3; life: number };
+type AmmoId = 'standard' | 'heavy';
+type Magazine = { id: number; rounds: number; capacity: number; ammo: AmmoId };
+type Projectile = { position: Vector3; velocity: Vector3; life: number; damage: number };
+
+// Fictional balancing values, not specifications for real cartridges.
+const ammunition = {
+  standard: { label: 'Standard', speed: 700, damage: 50, recoil: 1 },
+  heavy: { label: 'Heavy', speed: 600, damage: 70, recoil: 1.3 },
+} satisfies Record<AmmoId, { label: string; speed: number; damage: number; recoil: number }>;
 
 export function createCombat(
   scene: Scene,
@@ -29,45 +36,66 @@ export function createCombat(
   weapon.parent = camera;
   weapon.material = weaponMaterial;
   weapon.isPickable = false;
-  weapon.position.set(0.23, -0.2, 0.65);
 
   const targetMaterial = new StandardMaterial('targetMaterial', scene);
   targetMaterial.diffuseColor = new Color3(0.7, 0.23, 0.16);
   const targets = new Map<Mesh, number>();
-  for (const [index, x, z] of [[0, -8, 7], [1, 8, 10], [2, 0, 20]]) {
-    const target = MeshBuilder.CreateBox(`target${index}`, {
-      width: 0.8, height: 1.6, depth: 0.25,
-    }, scene);
-    target.position.set(x, 0.8, z);
-    target.material = targetMaterial;
-    targets.set(target, 100);
+  function spawnTargets(): void {
+    for (const target of targets.keys()) target.dispose();
+    targets.clear();
+    for (const [index, x, z] of [[0, -8, 7], [1, 8, 10], [2, 0, 20]]) {
+      const target = MeshBuilder.CreateBox(`target${index}`, {
+        width: 0.8, height: 1.6, depth: 0.25,
+      }, scene);
+      target.position.set(x, 0.8, z);
+      target.material = targetMaterial;
+      targets.set(target, 120);
+    }
   }
+  spawnTargets();
 
-  let loaded: Magazine = { id: 1, rounds: 30, capacity: 30 };
+  let loaded: Magazine = { id: 1, rounds: 29, capacity: 30, ammo: 'standard' };
+  let chamber: AmmoId | null = 'standard';
   const spare: Magazine[] = [
-    { id: 2, rounds: 30, capacity: 30 },
-    { id: 3, rounds: 30, capacity: 30 },
+    { id: 2, rounds: 30, capacity: 30, ammo: 'standard' },
+    { id: 3, rounds: 30, capacity: 30, ammo: 'heavy' },
   ];
-  const projectiles: Projectile[] = [];
+  let selectedId = 2;
+  let proficiency = 0.5;
   let aiming = false;
   let reloadRemaining = 0;
+  let reloadTargetId: number | null = null;
   let cooldown = 0;
   let recoil = 0;
-  let message = 'Targets: red panels. No enemy AI yet.';
   let shotQueued = false;
+  let message = 'Prototype range. Ammo values are fictional.';
+  let shotsConsumed = 0;
+  const initialTotal = 90;
+  const projectiles: Projectile[] = [];
 
+  function selectNext(): void {
+    if (reloadRemaining > 0) return;
+    const index = spare.findIndex(m => m.id === selectedId);
+    selectedId = spare[(index + 1) % spare.length].id;
+  }
   function reload(): void {
-    if (reloadRemaining > 0 || loaded.rounds === loaded.capacity) return;
-    if (!spare.some(m => m.rounds > loaded.rounds)) {
-      message = 'No spare magazine with more ammunition.';
+    if (reloadRemaining > 0) return;
+    const replacement = spare.find(m => m.id === selectedId);
+    if (!replacement || replacement.rounds === 0) {
+      message = 'Selected magazine is empty.';
       return;
     }
-    reloadRemaining = 2.2;
-    message = 'Reloading…';
+    reloadTargetId = replacement.id;
+    reloadRemaining = chamber === null ? 2.8 : 2.2;
+    message = chamber === null ? 'Empty reload…' : 'Magazine swap…';
   }
-
   window.addEventListener('keydown', event => {
-    if (!isPaused() && event.code === 'KeyR' && !event.repeat) reload();
+    if (isPaused() || event.repeat) return;
+    if (event.code === 'KeyR') reload();
+    if (event.code === 'KeyB') selectNext();
+    if (event.code === 'BracketLeft') proficiency = Math.max(0, proficiency - 0.25);
+    if (event.code === 'BracketRight') proficiency = Math.min(1, proficiency + 0.25);
+    if (event.code === 'KeyT') spawnTargets();
   });
   document.addEventListener('mousedown', event => {
     if (isPaused() || document.pointerLockElement === null) return;
@@ -82,53 +110,64 @@ export function createCombat(
   });
   window.addEventListener('blur', () => { aiming = false; shotQueued = false; });
 
+  function feedChamber(): void {
+    if (chamber === null && loaded.rounds > 0) {
+      loaded.rounds--;
+      chamber = loaded.ammo;
+    }
+  }
   function shoot(): void {
     if (reloadRemaining > 0 || cooldown > 0) return;
-    if (loaded.rounds === 0) {
-      message = 'Empty magazine. Press R.';
+    if (chamber === null) {
+      message = 'Empty chamber. Press R.';
       cooldown = 0.15;
       return;
     }
+    const ammo = ammunition[chamber];
+    chamber = null;
+    shotsConsumed++;
+    feedChamber();
+    cooldown = 0.12;
+    const recoilScale = (1.4 - proficiency * 0.7) * ammo.recoil;
+    recoil = Math.min(recoil + 0.07 * recoilScale, 0.18);
+
     const eye = player.position.add(new Vector3(0, 0.75, 0));
     const forward = camera.getForwardRay().direction.normalize();
     const intended = scene.pickWithRay(new Ray(eye, forward, 500),
       mesh => mesh !== player && (mesh.checkCollisions || targets.has(mesh as Mesh)));
     const aimPoint = intended?.hit && intended.pickedPoint
       ? intended.pickedPoint : eye.add(forward.scale(500));
-
-    // Muzzle anchored to the character, never the third-person camera.
     const right = new Vector3(forward.z, 0, -forward.x).normalize();
     const muzzle = eye.add(forward.scale(0.45))
       .add(right.scale(aiming ? 0.04 : 0.18))
       .add(new Vector3(0, aiming ? -0.08 : -0.18, 0));
     const direction = aimPoint.subtract(muzzle).normalize();
-    const spread = aiming ? 0.001 : 0.008;
+    const spread = (aiming ? 0.001 : 0.008) * (1.7 - proficiency);
     direction.x += (Math.random() - 0.5) * spread;
     direction.y += (Math.random() - 0.5) * spread;
     direction.z += (Math.random() - 0.5) * spread;
     direction.normalize();
+    kick((aiming ? 0.014 : 0.025) * recoilScale);
 
-    loaded.rounds--;
-    cooldown = 0.12;
-    recoil = Math.min(recoil + 0.07, 0.15);
-    kick(aiming ? 0.014 : 0.025);
-
-    const muzzleOffset = muzzle.subtract(eye);
+    const offset = muzzle.subtract(eye);
+    const length = offset.length();
     const obstruction = scene.pickWithRay(
-      new Ray(eye, muzzleOffset.scale(1 / muzzleOffset.length()), muzzleOffset.length()),
+      new Ray(eye, offset.scale(1 / length), length),
       mesh => mesh !== player && mesh.checkCollisions,
     );
     if (obstruction?.hit) {
-      message = 'Muzzle obstructed.';
+      message = 'Muzzle obstructed; round expended.';
       return;
     }
-    projectiles.push({ position: muzzle, velocity: direction.scale(700), life: 3 });
-    message = 'Fired.';
+    projectiles.push({
+      position: muzzle, velocity: direction.scale(ammo.speed),
+      life: 3, damage: ammo.damage,
+    });
+    message = `Fired ${ammo.label}.`;
   }
 
   function update(dt: number): void {
-    const paused = isPaused();
-    if (paused) {
+    if (isPaused()) {
       aiming = false;
       shotQueued = false;
     } else {
@@ -137,19 +176,21 @@ export function createCombat(
       if (reloadRemaining > 0) {
         reloadRemaining = Math.max(0, reloadRemaining - dt);
         if (reloadRemaining === 0) {
-          let best = 0;
-          for (let i = 1; i < spare.length; i++) {
-            if (spare[i].rounds > spare[best].rounds) best = i;
+          const index = spare.findIndex(m => m.id === reloadTargetId);
+          if (index >= 0) {
+            const replacement = spare.splice(index, 1)[0];
+            spare.push(loaded);
+            loaded = replacement;
+            // A tactical swap preserves the existing chambered cartridge.
+            feedChamber();
+            selectedId = spare[0].id;
+            message = 'Reload complete; ammunition preserved.';
           }
-          const replacement = spare.splice(best, 1)[0];
-          spare.push(loaded);
-          loaded = replacement;
-          message = 'Magazine replaced; removed rounds preserved.';
+          reloadTargetId = null;
         }
       }
       if (shotQueued) shoot();
       shotQueued = false;
-
       for (let i = projectiles.length - 1; i >= 0; i--) {
         const projectile = projectiles[i];
         projectile.velocity.y -= 9.81 * dt;
@@ -164,7 +205,7 @@ export function createCombat(
           const target = hit.pickedMesh as Mesh;
           const health = targets.get(target);
           if (health !== undefined) {
-            const remaining = health - 50;
+            const remaining = health - projectile.damage;
             message = `Target hit: ${Math.max(0, remaining)} health.`;
             if (remaining <= 0) {
               targets.delete(target);
@@ -179,11 +220,17 @@ export function createCombat(
     }
     camera.fov = aiming ? 0.7 : 1.05;
     weapon.position.set(aiming ? 0 : 0.23, aiming ? -0.13 : -0.2, 0.65 - recoil);
+    const total = loaded.rounds + spare.reduce((sum, m) => sum + m.rounds, 0)
+      + (chamber === null ? 0 : 1);
     panel.textContent = [
-      `Magazine ${loaded.id}: ${loaded.rounds}/${loaded.capacity}`,
-      `Spare magazines: ${spare.map(m => `${m.id}: ${m.rounds}`).join(' | ')}`,
+      `Chamber: ${chamber === null ? 'empty' : ammunition[chamber].label}`,
+      `Loaded #${loaded.id}: ${loaded.rounds}/${loaded.capacity} ${ammunition[loaded.ammo].label}`,
+      `Spare: ${spare.map(m => `${m.id === selectedId ? '>' : ''}#${m.id} ${m.rounds} ${ammunition[m.ammo].label}`).join(' | ')}`,
+      `Proficiency: ${Math.round(proficiency * 100)}% (test control)`,
+      `Remaining: ${total} | Expended: ${shotsConsumed} | Audit: ${total + shotsConsumed === initialTotal ? 'OK' : 'ERROR'}`,
       reloadRemaining > 0 ? `Reload: ${reloadRemaining.toFixed(1)}s` : message,
-      'Left click: fire · Hold right click: aim · R: reload',
+      'LMB: fire · RMB: aim · R: reload · B: select spare',
+      '[ / ]: test proficiency · T: reset targets only',
     ].join('\n');
   }
   return { update };
