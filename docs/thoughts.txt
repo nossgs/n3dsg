@@ -1,0 +1,8 @@
+Perplexity has this problem: My GitHub connector is github_mcp_direct, with read-only access. 
+For nossgs/n3dsg, get_file_contents lists directories correctly but file reads have returned only a 
+download acknowledgment, without exposing source text. The reliable source-reading workaround tested is 
+get_commit with detail: "full_patch". Use list_commits with a file path to locate relevant commits. 
+Remember that commit patches are diffs, not complete files; reconstruct from the file’s creation commit an
+d subsequent patches when necessary. search_code returned incomplete zero results in our test, so don’t interpret 
+that as proof the code is absent.
+
