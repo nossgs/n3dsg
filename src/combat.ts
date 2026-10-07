@@ -45,7 +45,7 @@ export function createCombat(scene: Scene, camera: UniversalCamera, player: Mesh
   playerHitbox.position.copyFrom(player.position);
   let playerHealth = 100; let hostileHealth = 150;
   let reaction = 0; let hostileCooldown = 0; let hostileStatus = 'Searching';
-  let lastSeen: Vector3 | null = null; let memoryRemaining = 0;
+  let lastSeen: Vector3 | null = null; let memoryRemaining = 8;
   let blockedTime = 0; let turnPreference = 1;
   let loaded: Magazine = { id: 1, rounds: 29, capacity: 30, ammo: 'standard' };
   let chamber: AmmoId | null = 'standard';
