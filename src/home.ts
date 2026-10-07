@@ -9,7 +9,7 @@ export function showHomeScreen(onPlay: () => void): void {
       <h1 id="home-title">n3dsg</h1>
       <p class="home-description">Find your own way to live.</p>
       <button id="home-play" type="button">Play</button>
-      <p class="home-controls">WASD to move · Mouse to look<br>Escape releases the mouse</p>
+      <p class="home-controls">WASD: move · Shift: sprint · Space: jump<br>Mouse: look · Escape: release mouse</p>
       <p class="home-version">Early development · No save system yet</p>
     </section>`;
   document.body.appendChild(home);
