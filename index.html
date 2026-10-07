@@ -8,10 +8,21 @@
 <body>
   <canvas id="game" aria-label="Game view"></canvas>
 
-  <section id="overlay">
+  <section id="hud">
     <h1 id="title"></h1>
-    <p>WASD: move · Drag mouse: look</p>
-    <p>This is a foundation scene, not gameplay.</p>
+    <p>WASD: move · Shift: sprint · V: change view</p>
+    <p>Mouse: look · Escape: pause</p>
+    <p id="view-label"></p>
+  </section>
+
+  <div id="crosshair" hidden>+</div>
+
+  <section id="pause-screen">
+    <div class="pause-card">
+      <h2>Paused</h2>
+      <p id="pause-message">Click Play to begin.</p>
+      <button id="play" type="button">Play</button>
+    </div>
   </section>
 
   <pre id="error" hidden></pre>
