@@ -1,4 +1,5 @@
 import { Scene, UniversalCamera, Mesh, MeshBuilder, StandardMaterial, Color3, Vector3, Ray } from '@babylonjs/core';
+import { createNavigation } from './navigation';
 type AmmoId = 'standard' | 'heavy';
 type Magazine = { id: number; rounds: number; capacity: number; ammo: AmmoId };
 type Projectile = { position: Vector3; velocity: Vector3; life: number; damage: number; owner: 'player' | 'hostile' };
@@ -14,16 +15,14 @@ export function createCombat(scene: Scene, camera: UniversalCamera, player: Mesh
   Object.assign(panel.style, { position: 'absolute', bottom: '20px', right: '20px', padding: '12px 16px',
     background: '#111c', color: '#eee', font: '13px system-ui', pointerEvents: 'none', whiteSpace: 'pre-line' });
   document.body.append(panel);
-  const damageIndicator = document.createElement('div');
-  damageIndicator.textContent = '▲';
-  Object.assign(damageIndicator.style, { position: 'absolute', left: '50%', top: '50%', width: '160px',
-    height: '160px', marginLeft: '-80px', marginTop: '-80px', textAlign: 'center',
-    color: '#ff493b', font: '28px system-ui', pointerEvents: 'none', opacity: '0', zIndex: '2' });
+  const damageIndicator = document.createElement('div'); damageIndicator.textContent = '▲';
+  Object.assign(damageIndicator.style, { position: 'absolute', left: '50%', top: '50%', width: '160px', height: '160px',
+    marginLeft: '-80px', marginTop: '-80px', textAlign: 'center', color: '#ff493b', font: '28px system-ui',
+    pointerEvents: 'none', opacity: '0', zIndex: '2' });
   document.body.append(damageIndicator);
   function material(name: string, color: Color3, emissive = false): StandardMaterial {
     const result = new StandardMaterial(name, scene); result.diffuseColor = color;
-    if (emissive) { result.emissiveColor = color; result.disableLighting = true; }
-    return result;
+    if (emissive) { result.emissiveColor = color; result.disableLighting = true; } return result;
   }
   const weaponMaterial = material('weaponMaterial', new Color3(0.12, 0.14, 0.16));
   const weapon = MeshBuilder.CreateBox('weaponPlaceholder', { width: 0.10, height: 0.12, depth: 0.55 }, scene);
@@ -33,36 +32,30 @@ export function createCombat(scene: Scene, camera: UniversalCamera, player: Mesh
   const hitMaterial = material('combatHit', new Color3(1, 0.25, 0.1), true);
   const corpseMaterial = material('hostileDefeated', new Color3(0.25, 0.2, 0.17));
   const firstPersonFlash = MeshBuilder.CreateSphere('weaponFlash', { diameter: 0.14, segments: 6 }, scene);
-  firstPersonFlash.parent = weapon; firstPersonFlash.position.z = 0.32;
-  firstPersonFlash.material = flashMaterial; firstPersonFlash.isPickable = false; firstPersonFlash.setEnabled(false);
+  firstPersonFlash.parent = weapon; firstPersonFlash.position.z = 0.32; firstPersonFlash.material = flashMaterial;
+  firstPersonFlash.isPickable = false; firstPersonFlash.setEnabled(false);
   const effects: Effect[] = []; let flashRemaining = 0; let damageRemaining = 0;
   let damageSource: Vector3 | null = null; let hostileHitRemaining = 0;
   function effect(position: Vector3, diameter: number, duration: number, mat: StandardMaterial): void {
     const mesh = MeshBuilder.CreateSphere('combatEffect', { diameter, segments: 6 }, scene);
-    mesh.position.copyFrom(position); mesh.material = mat; mesh.isPickable = false;
-    effects.push({ mesh, remaining: duration, duration });
+    mesh.position.copyFrom(position); mesh.material = mat; mesh.isPickable = false; effects.push({ mesh, remaining: duration, duration });
   }
   function updateFeedback(dt: number): void {
-    flashRemaining = Math.max(0, flashRemaining - dt);
-    firstPersonFlash.setEnabled(flashRemaining > 0);
-    damageRemaining = Math.max(0, damageRemaining - dt);
-    damageIndicator.style.opacity = String(Math.min(1, damageRemaining / 0.25));
+    flashRemaining = Math.max(0, flashRemaining - dt); firstPersonFlash.setEnabled(flashRemaining > 0);
+    damageRemaining = Math.max(0, damageRemaining - dt); damageIndicator.style.opacity = String(Math.min(1, damageRemaining / 0.25));
     if (damageSource && damageRemaining > 0) {
       const offset = damageSource.subtract(player.position); offset.y = 0;
-      const forward = camera.getForwardRay().direction; const yaw = Math.atan2(forward.x, forward.z);
-      const angle = Math.atan2(offset.x, offset.z) - yaw;
-      damageIndicator.style.transform = `rotate(${angle}rad)`;
+      const forward = camera.getForwardRay().direction;
+      damageIndicator.style.transform = `rotate(${Math.atan2(offset.x, offset.z) - Math.atan2(forward.x, forward.z)}rad)`;
     }
     hostileHitRemaining = Math.max(0, hostileHitRemaining - dt);
     hostileMaterial.emissiveColor = hostileHitRemaining > 0 ? new Color3(0.65, 0.2, 0.05) : Color3.Black();
     for (let i = effects.length - 1; i >= 0; i--) {
       const item = effects[i]; item.remaining -= dt;
-      if (item.remaining <= 0) { item.mesh.dispose(); effects.splice(i, 1); }
-      else { item.mesh.visibility = item.remaining / item.duration; }
+      if (item.remaining <= 0) { item.mesh.dispose(); effects.splice(i, 1); } else item.mesh.visibility = item.remaining / item.duration;
     }
   }
-  const targetMaterial = material('targetMaterial', new Color3(0.7, 0.23, 0.16));
-  const targets = new Map<Mesh, number>();
+  const targetMaterial = material('targetMaterial', new Color3(0.7, 0.23, 0.16)); const targets = new Map<Mesh, number>();
   function spawnTargets(): void {
     for (const target of targets.keys()) target.dispose(); targets.clear();
     for (const [index, x, z] of [[0, -8, 7], [1, 8, 10], [2, 0, 20]]) {
@@ -75,27 +68,24 @@ export function createCombat(scene: Scene, camera: UniversalCamera, player: Mesh
   const hostile = MeshBuilder.CreateCapsule('hostile', { height: 1.8, radius: 0.35 }, scene);
   hostile.material = hostileMaterial; hostile.position.set(8, 0.92, 15); hostile.rotation.y = Math.PI;
   hostile.ellipsoid = new Vector3(0.35, 0.9, 0.35); hostile.ellipsoidOffset = Vector3.Zero();
+  const navigation = createNavigation(scene, hostile);
   const hostileMarker = MeshBuilder.CreateBox('hostileFacing', { width: 0.18, height: 0.15, depth: 0.2 }, scene);
-  hostileMarker.parent = hostile; hostileMarker.position.set(0, 0.55, 0.35);
-  hostileMarker.material = weaponMaterial; hostileMarker.isPickable = false;
+  hostileMarker.parent = hostile; hostileMarker.position.set(0, 0.55, 0.35); hostileMarker.material = weaponMaterial; hostileMarker.isPickable = false;
   const playerHitbox = MeshBuilder.CreateCapsule('playerCombatHitbox', { height: 1.8, radius: 0.35 }, scene);
   playerHitbox.visibility = 0; playerHitbox.isPickable = true; playerHitbox.position.copyFrom(player.position);
-  let playerHealth = 100; let hostileHealth = 150;
-  let reaction = 0; let hostileCooldown = 0; let hostileStatus = 'Searching';
-  let lastSeen: Vector3 | null = null; let memoryRemaining = 0; let blockedTime = 0; let turnPreference = 1;
+  let playerHealth = 100; let hostileHealth = 150; let reaction = 0; let hostileCooldown = 0; let hostileStatus = 'Searching';
+  let lastSeen: Vector3 | null = null; let memoryRemaining = 0;
   let loaded: Magazine = { id: 1, rounds: 29, capacity: 30, ammo: 'standard' }; let chamber: AmmoId | null = 'standard';
   const spare: Magazine[] = [{ id: 2, rounds: 30, capacity: 30, ammo: 'standard' }, { id: 3, rounds: 30, capacity: 30, ammo: 'heavy' }];
-  let selectedId = 2; let proficiency = 0.5; let aiming = false; let reloadRemaining = 0;
-  let reloadTargetId: number | null = null; let cooldown = 0; let recoil = 0; let shotQueued = false; let shotsConsumed = 0;
-  let message = 'Combat feedback build. Orange capsule: hostile. Ammo values are fictional.';
+  let selectedId = 2; let proficiency = 0.5; let aiming = false; let reloadRemaining = 0; let reloadTargetId: number | null = null;
+  let cooldown = 0; let recoil = 0; let shotQueued = false; let shotsConsumed = 0;
+  let message = 'Navigation build. Orange capsule: hostile. Ammo values are fictional.';
   const initialTotal = 90; const projectiles: Projectile[] = [];
   function reset(): void {
-    playerHealth = 100; hostileHealth = 150; reaction = 0; hostileCooldown = 0; hostileStatus = 'Searching';
-    lastSeen = null; memoryRemaining = 0; blockedTime = 0; turnPreference = 1;
+    playerHealth = 100; hostileHealth = 150; reaction = 0; hostileCooldown = 0; hostileStatus = 'Searching'; lastSeen = null; memoryRemaining = 0;
     hostile.setEnabled(true); hostile.isPickable = true; hostile.rotation.set(0, Math.PI, 0);
-    hostile.position.set(8, 0.92, 15); hostile.material = hostileMaterial; hostileMarker.setEnabled(true);
-    hostile.computeWorldMatrix(true); projectiles.length = 0;
-    shotQueued = false; aiming = false; reloadRemaining = 0; reloadTargetId = null; cooldown = 0; recoil = 0;
+    hostile.position.set(8, 0.92, 15); hostile.material = hostileMaterial; hostileMarker.setEnabled(true); hostile.computeWorldMatrix(true);
+    navigation.reset(); projectiles.length = 0; shotQueued = false; aiming = false; reloadRemaining = 0; reloadTargetId = null; cooldown = 0; recoil = 0;
     for (const item of effects) item.mesh.dispose(); effects.length = 0;
     flashRemaining = 0; damageRemaining = 0; damageSource = null; hostileHitRemaining = 0;
     firstPersonFlash.setEnabled(false); damageIndicator.style.opacity = '0'; hostileMaterial.emissiveColor = Color3.Black();
@@ -103,19 +93,16 @@ export function createCombat(scene: Scene, camera: UniversalCamera, player: Mesh
   }
   function feedChamber(): void { if (chamber === null && loaded.rounds > 0) { loaded.rounds--; chamber = loaded.ammo; } }
   function reload(): void {
-    if (reloadRemaining > 0) return;
-    const replacement = spare.find(m => m.id === selectedId);
+    if (reloadRemaining > 0) return; const replacement = spare.find(m => m.id === selectedId);
     if (!replacement || replacement.rounds === 0) { message = 'Selected magazine is empty.'; return; }
-    reloadTargetId = replacement.id; reloadRemaining = chamber === null ? 2.8 : 2.2;
-    message = chamber === null ? 'Empty reload…' : 'Magazine swap…';
+    reloadTargetId = replacement.id; reloadRemaining = chamber === null ? 2.8 : 2.2; message = chamber === null ? 'Empty reload…' : 'Magazine swap…';
   }
   window.addEventListener('keydown', event => {
     if (isPaused() || playerHealth <= 0 || event.repeat) return;
     if (event.code === 'KeyR') reload();
     if (event.code === 'KeyB' && reloadRemaining === 0) { const index = spare.findIndex(m => m.id === selectedId); selectedId = spare[(index + 1) % spare.length].id; }
     if (event.code === 'BracketLeft') proficiency = Math.max(0, proficiency - 0.25);
-    if (event.code === 'BracketRight') proficiency = Math.min(1, proficiency + 0.25);
-    if (event.code === 'KeyT') spawnTargets();
+    if (event.code === 'BracketRight') proficiency = Math.min(1, proficiency + 0.25); if (event.code === 'KeyT') spawnTargets();
   });
   document.addEventListener('mousedown', event => {
     if (isPaused() || playerHealth <= 0 || document.pointerLockElement === null) return;
@@ -127,8 +114,7 @@ export function createCombat(scene: Scene, camera: UniversalCamera, player: Mesh
   function shoot(): void {
     if (reloadRemaining > 0 || cooldown > 0 || playerHealth <= 0) return;
     if (chamber === null) { message = 'Empty chamber. Press R.'; cooldown = 0.15; return; }
-    const ammo = ammunition[chamber]; chamber = null; shotsConsumed++; feedChamber(); cooldown = 0.12;
-    flashRemaining = 0.065;
+    const ammo = ammunition[chamber]; chamber = null; shotsConsumed++; feedChamber(); cooldown = 0.12; flashRemaining = 0.065;
     const recoilScale = (1.4 - proficiency * 0.7) * ammo.recoil; recoil = Math.min(recoil + 0.07 * recoilScale, 0.18);
     const eye = player.position.add(new Vector3(0, 0.75, 0)); const forward = camera.getForwardRay().direction.normalize();
     const intended = scene.pickWithRay(new Ray(eye, forward, 500), mesh => mesh !== player && mesh !== playerHitbox &&
@@ -137,42 +123,15 @@ export function createCombat(scene: Scene, camera: UniversalCamera, player: Mesh
     const right = new Vector3(forward.z, 0, -forward.x).normalize();
     const muzzle = eye.add(forward.scale(0.45)).add(right.scale(aiming ? 0.04 : 0.18)).add(new Vector3(0, aiming ? -0.08 : -0.18, 0));
     const direction = aimPoint.subtract(muzzle).normalize(); const spread = (aiming ? 0.001 : 0.008) * (1.7 - proficiency);
-    direction.x += (Math.random() - 0.5) * spread; direction.y += (Math.random() - 0.5) * spread;
-    direction.z += (Math.random() - 0.5) * spread; direction.normalize(); kick((aiming ? 0.014 : 0.025) * recoilScale);
+    direction.x += (Math.random() - 0.5) * spread; direction.y += (Math.random() - 0.5) * spread; direction.z += (Math.random() - 0.5) * spread;
+    direction.normalize(); kick((aiming ? 0.014 : 0.025) * recoilScale);
     const offset = muzzle.subtract(eye); const length = offset.length();
     const obstruction = scene.pickWithRay(new Ray(eye, offset.scale(1 / length), length), mesh => mesh !== player && mesh !== playerHitbox && mesh.checkCollisions);
-    if (obstruction?.hit) {
-      if (obstruction.pickedPoint) effect(obstruction.pickedPoint, 0.10, 0.18, impactMaterial);
-      message = 'Muzzle obstructed; round expended.'; return;
-    }
-    projectiles.push({ position: muzzle, velocity: direction.scale(ammo.speed), life: 3, damage: ammo.damage, owner: 'player' });
-    message = `Fired ${ammo.label}.`;
-  }
-  function moveHostile(destination: Vector3, dt: number): boolean {
-    const delta = destination.subtract(hostile.position); delta.y = 0; const distance = delta.length(); if (distance < 0.65) return true;
-    const desired = delta.scale(1 / distance); const step = Math.min(2.2 * dt, distance); const origin = hostile.position.clone();
-    const angles = [0, turnPreference * 0.65, -turnPreference * 0.65, turnPreference * 1.2, -turnPreference * 1.2, turnPreference * 1.7];
-    let steering: Vector3 | null = null;
-    for (const angle of angles) {
-      const direction = new Vector3(desired.x * Math.cos(angle) + desired.z * Math.sin(angle), 0, desired.z * Math.cos(angle) - desired.x * Math.sin(angle));
-      const right = new Vector3(direction.z, 0, -direction.x); let clear = true;
-      for (const side of [-0.34, 0, 0.34]) {
-        const hit = scene.pickWithRay(new Ray(origin.add(right.scale(side)), direction, 0.7 + step),
-          mesh => mesh !== hostile && mesh !== player && mesh !== playerHitbox && mesh.checkCollisions);
-        if (hit?.hit) { clear = false; break; }
-      }
-      if (clear) { steering = direction; break; }
-    }
-    const before = hostile.position.clone();
-    if (steering) { hostile.rotation.y = Math.atan2(steering.x, steering.z); const movement = steering.scale(step); movement.y = -3 * dt; hostile.moveWithCollisions(movement); }
-    else hostile.moveWithCollisions(new Vector3(0, -3 * dt, 0));
-    const moved = new Vector3(hostile.position.x - before.x, 0, hostile.position.z - before.z).length();
-    blockedTime = moved < step * 0.15 ? blockedTime + dt : 0; if (blockedTime > 1) { turnPreference *= -1; blockedTime = 0; }
-    hostile.computeWorldMatrix(true); return false;
+    if (obstruction?.hit) { if (obstruction.pickedPoint) effect(obstruction.pickedPoint, 0.10, 0.18, impactMaterial); message = 'Muzzle obstructed; round expended.'; return; }
+    projectiles.push({ position: muzzle, velocity: direction.scale(ammo.speed), life: 3, damage: ammo.damage, owner: 'player' }); message = `Fired ${ammo.label}.`;
   }
   function updateHostile(dt: number): void {
-    if (hostileHealth <= 0) return;
-    hostileCooldown = Math.max(0, hostileCooldown - dt);
+    if (hostileHealth <= 0) return; hostileCooldown = Math.max(0, hostileCooldown - dt);
     const eye = hostile.position.add(new Vector3(0, 0.65, 0)); const target = player.position.add(new Vector3(0, 0.4, 0));
     const offset = target.subtract(eye); const distance = offset.length(); if (distance < 0.001) return;
     const direction = offset.scale(1 / distance); const flat = new Vector3(direction.x, 0, direction.z).normalize();
@@ -181,23 +140,22 @@ export function createCombat(scene: Scene, camera: UniversalCamera, player: Mesh
     const visible = distance <= 35 && Vector3.Dot(flat, facing) >= 0.5 && !blocked?.hit;
     if (!visible) {
       reaction = 0; memoryRemaining = Math.max(0, memoryRemaining - dt);
-      if (lastSeen && memoryRemaining > 0) { const arrived = moveHostile(lastSeen, dt); hostileStatus = arrived ? 'Searching last seen position' : 'Investigating'; if (arrived) hostile.rotation.y += dt * 0.8; }
-      else { lastSeen = null; hostileStatus = 'Searching'; hostile.rotation.y += dt * 0.45; }
+      if (lastSeen && memoryRemaining > 0) {
+        const arrived = navigation.move(lastSeen, dt); hostileStatus = arrived ? 'Searching last seen position' : 'Investigating';
+        if (arrived) hostile.rotation.y += dt * 0.8;
+      } else { lastSeen = null; hostileStatus = 'Searching'; hostile.rotation.y += dt * 0.45; }
       return;
     }
-    lastSeen = player.position.clone(); memoryRemaining = 8; hostile.rotation.y = Math.atan2(direction.x, direction.z); reaction += dt;
-    if (reaction < 0.9) { hostileStatus = 'Reacting'; return; }
-    if (new Vector3(offset.x, 0, offset.z).length() > 14) { hostileStatus = 'Approaching'; moveHostile(lastSeen, dt); return; }
-    hostileStatus = 'Engaging'; if (hostileCooldown > 0) return;
+    lastSeen = player.position.clone(); memoryRemaining = 8; reaction += dt;
+    if (reaction < 0.9) { navigation.face(direction, dt); hostileStatus = 'Reacting'; return; }
+    if (new Vector3(offset.x, 0, offset.z).length() > 14) { hostileStatus = 'Approaching'; navigation.move(lastSeen, dt); return; }
+    navigation.face(direction, dt); hostileStatus = 'Engaging'; if (hostileCooldown > 0) return;
     hostileCooldown = 0.75; const shotDirection = direction.clone();
     shotDirection.x += (Math.random() - 0.5) * 0.025; shotDirection.y += (Math.random() - 0.5) * 0.025;
     shotDirection.z += (Math.random() - 0.5) * 0.025; shotDirection.normalize();
     const muzzle = eye.add(shotDirection.scale(0.45));
     const muzzleBlocked = scene.pickWithRay(new Ray(eye, shotDirection, 0.45), mesh => mesh !== hostile && mesh !== player && mesh !== playerHitbox && mesh.checkCollisions);
-    if (!muzzleBlocked?.hit) {
-      effect(muzzle, 0.18, 0.09, flashMaterial);
-      projectiles.push({ position: muzzle, velocity: shotDirection.scale(180), life: 2, damage: 20, owner: 'hostile' });
-    }
+    if (!muzzleBlocked?.hit) { effect(muzzle, 0.18, 0.09, flashMaterial); projectiles.push({ position: muzzle, velocity: shotDirection.scale(180), life: 2, damage: 20, owner: 'hostile' }); }
   }
   function update(dt: number): void {
     playerHitbox.position.copyFrom(player.position); playerHitbox.computeWorldMatrix(true);
@@ -218,8 +176,7 @@ export function createCombat(scene: Scene, camera: UniversalCamera, player: Mesh
         const segment = projectile.velocity.scale(dt); const distance = segment.length(); if (distance <= 0) continue;
         const hit = scene.pickWithRay(new Ray(projectile.position, segment.scale(1 / distance), distance), mesh => {
           if (mesh === player) return false; if (mesh === playerHitbox) return projectile.owner === 'hostile';
-          if (mesh === hostile) return projectile.owner === 'player' && hostileHealth > 0;
-          return mesh.checkCollisions || targets.has(mesh as Mesh);
+          if (mesh === hostile) return projectile.owner === 'player' && hostileHealth > 0; return mesh.checkCollisions || targets.has(mesh as Mesh);
         });
         projectile.life -= dt;
         if (hit?.hit) {
@@ -232,11 +189,8 @@ export function createCombat(scene: Scene, camera: UniversalCamera, player: Mesh
             message = playerHealth === 0 ? 'You died. Y: development reset.' : 'Hostile hit you.';
           } else if (target === hostile) {
             hostileHitRemaining = 0.16; hostileHealth = Math.max(0, hostileHealth - projectile.damage); message = `Hostile health: ${hostileHealth}`;
-            if (hostileHealth === 0) {
-              hostileStatus = 'Dead'; hostile.isPickable = false; hostile.material = corpseMaterial;
-              hostile.rotation.z = Math.PI / 2; hostile.position.y = 0.36; hostileMarker.setEnabled(false);
-              hostile.computeWorldMatrix(true); message = 'Hostile defeated.';
-            }
+            if (hostileHealth === 0) { hostileStatus = 'Dead'; hostile.isPickable = false; hostile.material = corpseMaterial;
+              hostile.rotation.z = Math.PI / 2; hostile.position.y = 0.36; hostileMarker.setEnabled(false); hostile.computeWorldMatrix(true); message = 'Hostile defeated.'; }
           } else {
             const health = targets.get(target);
             if (health !== undefined) { const remaining = health - projectile.damage; message = `Target hit: ${Math.max(0, remaining)} health.`;
@@ -250,8 +204,9 @@ export function createCombat(scene: Scene, camera: UniversalCamera, player: Mesh
     }
     camera.fov = aiming ? 0.7 : 1.05; weapon.position.set(aiming ? 0 : 0.23, aiming ? -0.13 : -0.2, 0.65 - recoil);
     const total = loaded.rounds + spare.reduce((sum, m) => sum + m.rounds, 0) + (chamber === null ? 0 : 1);
-    panel.textContent = ['Build: combat feedback', `Player: ${playerHealth}/100 ${playerHealth === 0 ? 'DEAD' : ''}`,
-      `Hostile: ${hostileHealth}/150 · ${hostileStatus}`, `Chamber: ${chamber === null ? 'empty' : ammunition[chamber].label}`,
+    panel.textContent = ['Build: NPC navigation', `Player: ${playerHealth}/100 ${playerHealth === 0 ? 'DEAD' : ''}`,
+      `Hostile: ${hostileHealth}/150 · ${hostileStatus}`, `Navigation: ${navigation.info()}`,
+      `Chamber: ${chamber === null ? 'empty' : ammunition[chamber].label}`,
       `Loaded #${loaded.id}: ${loaded.rounds}/${loaded.capacity} ${ammunition[loaded.ammo].label}`,
       `Spare: ${spare.map(m => `${m.id === selectedId ? '>' : ''}#${m.id} ${m.rounds} ${ammunition[m.ammo].label}`).join(' | ')}`,
       `Proficiency: ${Math.round(proficiency * 100)}% (test control)`,
