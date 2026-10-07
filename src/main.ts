@@ -2,22 +2,23 @@ import { Engine, Scene, Vector3, HemisphericLight, DirectionalLight, MeshBuilder
 import './style.css';
 import { showHomeScreen } from './home';
 import { createPlayer } from './player';
+import { createTerrain } from './terrain';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#game')!;
 const engine = new Engine(canvas, true);
 const scene = new Scene(engine);
 scene.clearColor = new Color4(0.57, 0.66, 0.72, 1);
 scene.collisionsEnabled = true;
+scene.fogMode = Scene.FOGMODE_EXP2;
+scene.fogColor = new Color3(0.57, 0.66, 0.72);
+scene.fogDensity = 0.00065;
 const ambient = new HemisphericLight('sky', new Vector3(0, 1, 0), scene);
 ambient.intensity = 0.65;
 const sun = new DirectionalLight('sun', new Vector3(-1, -2, 1), scene);
 sun.position = new Vector3(20, 30, -20); sun.intensity = 1.1;
 const shadows = new ShadowGenerator(1024, sun);
 shadows.useBlurExponentialShadowMap = true;
-const earth = new StandardMaterial('earth', scene);
-earth.diffuseColor = new Color3(0.32, 0.36, 0.25); earth.specularColor = Color3.Black();
-const ground = MeshBuilder.CreateGround('ground', { width: 100, height: 100 }, scene);
-ground.material = earth; ground.checkCollisions = true; ground.receiveShadows = true;
+createTerrain(scene);
 const concrete = new StandardMaterial('concrete', scene);
 concrete.diffuseColor = new Color3(0.55, 0.52, 0.46); concrete.specularColor = Color3.Black();
 function wall(name: string, x: number, z: number, width: number, depth: number) {
