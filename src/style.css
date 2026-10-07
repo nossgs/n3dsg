@@ -1,0 +1,51 @@
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #111;
+  font-family: system-ui, sans-serif;
+}
+
+#game {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  outline: none;
+}
+
+#overlay {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  padding: 14px 18px;
+  color: #eee;
+  background: #111b;
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+h1 {
+  margin: 0 0 10px;
+  font-size: 22px;
+}
+
+p {
+  margin: 6px 0;
+  font-size: 13px;
+}
+
+#error {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  right: 16px;
+  padding: 16px;
+  color: #ffd4d4;
+  background: #310c0cf0;
+  white-space: pre-wrap;
+  max-height: 40vh;
+  overflow: auto;
+}
