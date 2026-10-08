@@ -168,8 +168,8 @@ jobs:
                   .update(bytes)
                   .digest('hex'),
                 preparation: {
-                  simplifyRatio: 0.01,
-                  simplifyError: 0.002,
+                  simplifyRatio: 0.002,
+                  simplifyError: 0.01,
                   visuallyValidated: false
                 }
               }
