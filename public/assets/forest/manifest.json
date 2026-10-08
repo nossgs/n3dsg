@@ -79,6 +79,26 @@
           "md5": "f5ba950ee648056809153e0506f8a2e2"
         }
       }
+    },
+    "foliage": {
+      "asset": "pine_tree_01",
+      "source": "https://polyhaven.com/a/pine_tree_01",
+      "maps": {
+        "albedo": "foliage/albedo.jpg",
+        "alpha": "foliage/alpha.png"
+      },
+      "provenance": {
+        "albedo": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/pine_tree_01/pine_tree_01_twig_diff_1k.jpg",
+          "bytes": 510932,
+          "md5": "b6e5f4e8c228c275e5ff75cb165c2e1f"
+        },
+        "alpha": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/png/1k/pine_tree_01/pine_tree_01_twig_alpha_1k.png",
+          "bytes": 351928,
+          "md5": "641911a5a3f543911dad04ebb26e7bca"
+        }
+      }
     }
   }
 }
