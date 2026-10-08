@@ -25,7 +25,7 @@ const manifest = { license: 'CC0-1.0', materials: {} };
 for (const [key, asset] of Object.entries({ soil, bark: 'pine_bark' })) {
   const metadata = await json(`https://api.polyhaven.com/files/${encodeURIComponent(asset)}`);
   const maps = {}, provenance = {};
-  for (const [name, map] of [['albedo', 'diff'], ['normal', 'nor_gl'], ['roughness', 'rough']]) {
+  for (const [name, map] of [['albedo', 'Diffuse'], ['normal', 'nor_gl'], ['roughness', 'Rough']]) {
     const formats = metadata[map]?.['1k'];
     const entry = formats?.png ?? formats?.jpg;
     if (!entry?.url) throw new Error(`${asset}: required 1k ${map} map missing`);
