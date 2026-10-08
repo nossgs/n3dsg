@@ -1,0 +1,84 @@
+{
+  "license": "CC0-1.0",
+  "resolution": "1k",
+  "materials": {
+    "soil": {
+      "asset": "forest_ground_05",
+      "source": "https://polyhaven.com/a/forest_ground_05",
+      "maps": {
+        "albedo": "soil/albedo.jpg",
+        "normal": "soil/normal.png",
+        "roughness": "soil/roughness.jpg"
+      },
+      "provenance": {
+        "albedo": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_05/forest_ground_05_diff_1k.jpg",
+          "bytes": 655934,
+          "md5": "7fcf121f5d2ac2ffe665d42d5fe69478"
+        },
+        "normal": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/png/1k/forest_ground_05/forest_ground_05_nor_gl_1k.png",
+          "bytes": 5882488,
+          "md5": "75870079bb79fc3f05d0ded715f962c2"
+        },
+        "roughness": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_05/forest_ground_05_rough_1k.jpg",
+          "bytes": 330104,
+          "md5": "c2619569b0867614b003f4b947ecf329"
+        }
+      }
+    },
+    "dirt": {
+      "asset": "brown_mud",
+      "source": "https://polyhaven.com/a/brown_mud",
+      "maps": {
+        "albedo": "dirt/albedo.jpg",
+        "normal": "dirt/normal.png",
+        "roughness": "dirt/roughness.jpg"
+      },
+      "provenance": {
+        "albedo": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/brown_mud/brown_mud_diff_1k.jpg",
+          "bytes": 501955,
+          "md5": "b141af27b413db140818d0a4998c394c"
+        },
+        "normal": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/png/1k/brown_mud/brown_mud_nor_gl_1k.png",
+          "bytes": 2449515,
+          "md5": "8b4aafda3045e6d6f77bf355fbae7027"
+        },
+        "roughness": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/brown_mud/brown_mud_rough_1k.jpg",
+          "bytes": 340815,
+          "md5": "fb4d5d8ef98ebee6a402955b99103a3a"
+        }
+      }
+    },
+    "bark": {
+      "asset": "pine_bark",
+      "source": "https://polyhaven.com/a/pine_bark",
+      "maps": {
+        "albedo": "bark/albedo.jpg",
+        "normal": "bark/normal.png",
+        "roughness": "bark/roughness.jpg"
+      },
+      "provenance": {
+        "albedo": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/pine_bark/pine_bark_diff_1k.jpg",
+          "bytes": 837641,
+          "md5": "7bb38cccfc647aeaf2f5b6488c815e75"
+        },
+        "normal": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/png/1k/pine_bark/pine_bark_nor_gl_1k.png",
+          "bytes": 5844630,
+          "md5": "f048956ac565eb88217b9e95f744cedd"
+        },
+        "roughness": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/pine_bark/pine_bark_rough_1k.jpg",
+          "bytes": 506697,
+          "md5": "f5ba950ee648056809153e0506f8a2e2"
+        }
+      }
+    }
+  }
+}
