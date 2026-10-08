@@ -1,95 +1,149 @@
-import { AbstractMesh, AssetContainer, Mesh, MeshBuilder, Scene, SceneLoader, ShadowGenerator, TransformNode, Vector3 } from '@babylonjs/core';
+import { AbstractMesh, Color3, Material, Mesh, MeshBuilder, MultiMaterial, PBRMaterial, Scene, SceneLoader, ShadowGenerator, StandardMaterial, Texture, TransformNode, Vector3 } from '@babylonjs/core';
 import '@babylonjs/loaders/glTF';
-import { seededRandom } from '../generation/random';
 import { groundHeight } from '../terrain/terrain';
 const base = (import.meta as ImportMeta & { env: { BASE_URL: string } }).env.BASE_URL;
-const MAX_TREES = 120;
-const VISIBLE_RADIUS = 150;
-const SHADOW_RADIUS = 40;
-type Tree = { root: TransformNode; meshes: AbstractMesh[]; x: number; z: number; casts: boolean };
+type SavedMaterial = {
+  material: Material;
+  transparency: number | null;
+  alpha: number;
+  opacity: Texture | null;
+  fromAlbedo?: boolean;
+  fromDiffuse?: boolean;
+};
 
 export function buildTrees(scene: Scene, shadows: ShadowGenerator): void {
-  const notice = document.createElement('div');
-  notice.style.cssText = 'position:fixed;top:48px;left:12px;z-index:50;background:#182218dd;color:white;padding:8px;font:12px monospace;pointer-events:none';
-  notice.textContent = 'Loading authored pine asset…'; document.body.appendChild(notice);
-  void loadTrees(scene, shadows).then(() => notice.remove()).catch(error => {
-    notice.textContent = `Tree import failed: ${String(error)}`; console.error(error);
+  const panel = document.createElement('div');
+  panel.style.cssText = 'position:fixed;left:12px;top:12px;z-index:60;width:350px;max-height:70vh;overflow:auto;background:#101914ee;color:#eef4e8;padding:12px;border:1px solid #748473;border-radius:5px;font:12px/1.5 monospace;pointer-events:auto';
+  panel.textContent = 'Loading one diagnostic tree…'; document.body.appendChild(panel);
+  void loadDiagnostic(scene, shadows, panel).catch(error => {
+    panel.textContent = `Tree diagnostic failed: ${String(error)}`; console.error(error);
   });
+  scene.onDisposeObservable.add(() => panel.remove());
 }
-async function loadTrees(scene: Scene, shadows: ShadowGenerator): Promise<void> {
+async function loadDiagnostic(scene: Scene, shadows: ShadowGenerator, panel: HTMLDivElement): Promise<void> {
   const response = await fetch(`${base}assets/trees/manifest.json`);
-  if (!response.ok) throw new Error(`Tree manifest HTTP ${response.status}. Run Import forest assets first.`);
-  const manifest = await response.json() as { trees: { pine: { file: string } } };
-  const file = manifest.trees.pine.file;
-  const slash = file.lastIndexOf('/');
-  const container = await SceneLoader.LoadAssetContainerAsync(`${base}assets/trees/${file.slice(0, slash + 1)}`, file.slice(slash + 1), scene);
+  if (!response.ok) throw new Error(`Tree manifest HTTP ${response.status}`);
+  const manifest = await response.json() as { trees: { pine: { file: string; triangles?: number } } };
+  const entry = manifest.trees.pine, slash = entry.file.lastIndexOf('/');
+  const container = await SceneLoader.LoadAssetContainerAsync(`${base}assets/trees/${entry.file.slice(0, slash + 1)}`, entry.file.slice(slash + 1), scene);
   if (scene.isDisposed) { container.dispose(); return; }
-  populate(scene, shadows, container);
-}
-function populate(scene: Scene, shadows: ShadowGenerator, container: AssetContainer): void {
-  const min = new Vector3(Infinity, Infinity, Infinity), max = new Vector3(-Infinity, -Infinity, -Infinity);
-  let vertices = 0, triangles = 0;
-  for (const mesh of container.meshes) {
-    if (!mesh.getTotalVertices()) continue;
-    mesh.computeWorldMatrix(true);
-    const bounds = mesh.getBoundingInfo().boundingBox;
-    min.minimizeInPlace(bounds.minimumWorld); max.maximizeInPlace(bounds.maximumWorld);
-    vertices += mesh.getTotalVertices(); triangles += mesh.getTotalIndices() / 3;
-    mesh.isPickable = false;
+  const importedRoots = [...container.rootNodes];
+  container.addAllToScene();
+  const placement = new TransformNode('diagnostic-tree-placement', scene);
+  const origin = new TransformNode('diagnostic-tree-origin', scene); origin.parent = placement;
+  for (const node of importedRoots) node.parent = origin;
+  const meshes = placement.getChildMeshes().filter(mesh => mesh.getTotalVertices() > 0);
+  if (!meshes.length) throw new Error('Tree has no renderable meshes.');
+  const bounds = () => {
+    const min = new Vector3(Infinity, Infinity, Infinity), max = new Vector3(-Infinity, -Infinity, -Infinity);
+    for (const mesh of meshes) {
+      mesh.computeWorldMatrix(true);
+      const box = mesh.getBoundingInfo().boundingBox;
+      min.minimizeInPlace(box.minimumWorld); max.maximizeInPlace(box.maximumWorld);
+    }
+    return { min, max };
+  };
+  const initial = bounds(), height = initial.max.y - initial.min.y;
+  if (!Number.isFinite(height) || height <= 0) throw new Error('Invalid tree bounds.');
+  origin.position.set(-(initial.min.x + initial.max.x) / 2, -initial.min.y, -(initial.min.z + initial.max.z) / 2);
+  placement.scaling.setAll(18 / height);
+  const x = -10, z = -1;
+  placement.position.set(x, groundHeight(x, z), z);
+  // Measure again after all parent transforms, then align the actual lowest geometry.
+  const planted = bounds(); placement.position.y += groundHeight(x, z) - planted.min.y;
+  bounds();
+  for (const mesh of meshes) { mesh.isPickable = false; mesh.receiveShadows = true; }
+
+  const materialSet = new Set<Material>();
+  for (const mesh of meshes) {
+    if (mesh.material instanceof MultiMaterial) for (const sub of mesh.material.subMaterials) { if (sub) materialSet.add(sub); }
+    else if (mesh.material) materialSet.add(mesh.material);
   }
-  const sourceHeight = max.y - min.y;
-  if (!Number.isFinite(sourceHeight) || sourceHeight <= 0) throw new Error('Imported tree has invalid bounds.');
-  console.info('Authored pine source', { sourceHeight, vertices, triangles, materials: container.materials.length });
-  const random = seededRandom(27491), trees: Tree[] = [];
-  let accepted = 0;
-  for (let attempt = 0; attempt < 320 && accepted < MAX_TREES; attempt++) {
-    // Deterministic density patches, with trail and shelter exclusions.
-    const x = (random() - 0.5) * 340, z = (random() - 0.5) * 340;
-    if (Math.hypot(x, z - 6) < 21 || (Math.abs(x) < 4 && z < 2)) continue;
-    const density = 0.58 + 0.22 * Math.sin(x / 31) * Math.cos(z / 37);
-    if (random() > density) continue;
-    const slope = Math.hypot(groundHeight(x + 1, z) - groundHeight(x - 1, z), groundHeight(x, z + 1) - groundHeight(x, z - 1)) / 2;
-    if (slope > 0.65) continue;
-    if (trees.some(tree => (tree.x - x) ** 2 + (tree.z - z) ** 2 < 16)) continue;
-    const id = accepted++;
-    const instances = container.instantiateModelsToScene(name => `pine-${id}-${name}`, false, { doNotInstantiate: false });
-    const root = new TransformNode(`pine-placement-${id}`, scene);
-    // Preserve source-space structure; normalize only the complete asset.
-    const assetRoot = new TransformNode(`pine-origin-${id}`, scene);
-    assetRoot.parent = root;
-    assetRoot.position.set(-(min.x + max.x) / 2, -min.y, -(min.z + max.z) / 2);
-    for (const node of instances.rootNodes) node.parent = assetRoot;
-    const scale = (17 + random() * 7) / sourceHeight;
-    root.scaling.setAll(scale); root.rotation.y = random() * Math.PI * 2;
-    root.position.set(x, groundHeight(x, z), z);
-    const meshes = root.getChildMeshes();
-    for (const mesh of meshes) { mesh.isPickable = false; mesh.receiveShadows = true; }
-    trees.push({ root, meshes, x, z, casts: false });
-    if (Math.hypot(x, z) < 60) {
-      const collider = MeshBuilder.CreateBox('trunk-collider', { width: 0.7, depth: 0.7, height: 10 }, scene);
-      collider.position.set(x, groundHeight(x, z) + 5, z); collider.isVisible = false;
-      collider.isPickable = false; collider.checkCollisions = true; collider.computeWorldMatrix(true);
+  const materialHasCutout = (material: Material | null): boolean => {
+    if (!material) return false;
+    if (material.transparencyMode === Material.MATERIAL_ALPHATEST || material.transparencyMode === Material.MATERIAL_ALPHATESTANDBLEND) return true;
+    if (material instanceof PBRMaterial) return Boolean(material.opacityTexture || (material.useAlphaFromAlbedoTexture && material.albedoTexture?.hasAlpha));
+    if (material instanceof StandardMaterial) return Boolean(material.opacityTexture || (material.useAlphaFromDiffuseTexture && material.diffuseTexture?.hasAlpha));
+    return false;
+  };
+  const isFoliage = (mesh: AbstractMesh): boolean => {
+    const names = `${mesh.name} ${mesh.material?.name ?? ''}`.toLowerCase();
+    if (/twig|foliage|leaf|leaves|needle/.test(names)) return true;
+    if (mesh.material instanceof MultiMaterial) return mesh.material.subMaterials.some(materialHasCutout);
+    return materialHasCutout(mesh.material);
+  };
+  const foliage = meshes.filter(isFoliage);
+  const textures = new Map<Texture, boolean>();
+  const saved: SavedMaterial[] = [];
+  for (const material of materialSet) {
+    if (material instanceof PBRMaterial) {
+      saved.push({ material, transparency: material.transparencyMode, alpha: material.alpha, opacity: material.opacityTexture as Texture | null, fromAlbedo: material.useAlphaFromAlbedoTexture });
+      if (material.albedoTexture instanceof Texture && !textures.has(material.albedoTexture)) textures.set(material.albedoTexture, material.albedoTexture.hasAlpha);
+    } else if (material instanceof StandardMaterial) {
+      saved.push({ material, transparency: material.transparencyMode, alpha: material.alpha, opacity: material.opacityTexture, fromDiffuse: material.useAlphaFromDiffuseTexture });
+      if (material.diffuseTexture instanceof Texture && !textures.has(material.diffuseTexture)) textures.set(material.diffuseTexture, material.diffuseTexture.hasAlpha);
     }
   }
-  let elapsed = 1000;
-  scene.onBeforeRenderObservable.add(() => {
-    elapsed += scene.getEngine().getDeltaTime();
-    if (elapsed < 250 || !scene.activeCamera) return;
-    elapsed = 0;
-    const position = scene.activeCamera.globalPosition;
-    for (const tree of trees) {
-      const distance2 = (tree.x - position.x) ** 2 + (tree.z - position.z) ** 2;
-      tree.root.setEnabled(distance2 < VISIBLE_RADIUS ** 2);
-      const casts = distance2 < SHADOW_RADIUS ** 2;
-      if (casts !== tree.casts) {
-        for (const mesh of tree.meshes) {
-          if (!mesh.getTotalVertices()) continue;
-          if (casts) shadows.addShadowCaster(mesh); else shadows.removeShadowCaster(mesh);
-        }
-        tree.casts = casts;
+  let cutouts = true, foliageVisible = true, treeShadows = false;
+  const applyCutouts = () => {
+    for (const [texture, hasAlpha] of textures) texture.hasAlpha = cutouts ? hasAlpha : false;
+    for (const savedMaterial of saved) {
+      const material = savedMaterial.material;
+      material.transparencyMode = cutouts ? savedMaterial.transparency : Material.MATERIAL_OPAQUE;
+      material.alpha = cutouts ? savedMaterial.alpha : 1;
+      if (material instanceof PBRMaterial) {
+        material.opacityTexture = cutouts ? savedMaterial.opacity : null;
+        material.useAlphaFromAlbedoTexture = cutouts ? Boolean(savedMaterial.fromAlbedo) : false;
+      } else if (material instanceof StandardMaterial) {
+        material.opacityTexture = cutouts ? savedMaterial.opacity : null;
+        material.useAlphaFromDiffuseTexture = cutouts ? Boolean(savedMaterial.fromDiffuse) : false;
       }
+      material.markAsDirty(63);
     }
+  };
+  const applyShadows = () => {
+    for (const mesh of meshes) { if (treeShadows) shadows.addShadowCaster(mesh); else shadows.removeShadowCaster(mesh); }
+  };
+
+  const marker = MeshBuilder.CreateBox('tree-ground-reference', { width: 2, depth: 2, height: 0.02 }, scene);
+  marker.position.set(x, groundHeight(x, z) + 0.015, z); marker.isPickable = false;
+  const markerMaterial = new StandardMaterial('ground-reference', scene); markerMaterial.diffuseColor = new Color3(0.9, 0.22, 0.12);
+  markerMaterial.emissiveColor = new Color3(0.3, 0.04, 0.01); marker.material = markerMaterial;
+  panel.textContent = '';
+  const heading = document.createElement('div'); heading.textContent = 'SINGLE TREE DIAGNOSTIC'; panel.appendChild(heading);
+  const instructions = document.createElement('div'); instructions.textContent = 'Tree: left of shelter, x=-10 z=-1. Red square marks ground. Esc releases mouse for controls.'; panel.appendChild(instructions);
+  const fps = document.createElement('div'); panel.appendChild(fps);
+  const counts = document.createElement('div'); panel.appendChild(counts);
+  const triangleCount = (mesh: AbstractMesh) => mesh.getTotalIndices() ? mesh.getTotalIndices() / 3 : mesh.getTotalVertices() / 3;
+  const rows = meshes.map(mesh => ({ mesh: mesh.name, material: mesh.material?.name ?? '(none)', triangles: Math.round(triangleCount(mesh)), vertices: mesh.getTotalVertices(), foliage: isFoliage(mesh) }));
+  const total = rows.reduce((sum, row) => sum + row.triangles, 0);
+  counts.textContent = `${total.toLocaleString()} triangles · ${meshes.length} meshes · ${materialSet.size} materials · ${foliage.length} foliage meshes detected`;
+  console.table(rows);
+  console.info('Tree diagnostic', { importedHeight: height, plantedBounds: bounds(), manifestTriangles: entry.triangles, runtimeTriangles: total });
+  function button(): HTMLButtonElement {
+    const element = document.createElement('button');
+    element.style.cssText = 'display:block;width:100%;margin:7px 0;padding:7px;background:#314232;color:white;border:1px solid #71816e;cursor:pointer';
+    panel.appendChild(element); return element;
+  }
+  const opacityButton = button(), foliageButton = button(), shadowsButton = button();
+  const refresh = () => {
+    opacityButton.textContent = `Opacity cutouts: ${cutouts ? 'ON (original)' : 'OFF (solid geometry)'}`;
+    foliageButton.textContent = `Foliage visibility: ${foliageVisible ? 'ON' : 'OFF'}`;
+    shadowsButton.textContent = `Tree casting shadows: ${treeShadows ? 'ON' : 'OFF'}`;
+  };
+  opacityButton.onclick = () => { cutouts = !cutouts; applyCutouts(); refresh(); };
+  foliageButton.onclick = () => { foliageVisible = !foliageVisible; for (const mesh of foliage) mesh.setEnabled(foliageVisible); refresh(); };
+  shadowsButton.onclick = () => { treeShadows = !treeShadows; applyShadows(); refresh(); };
+  refresh(); applyShadows();
+  if (!foliage.length) {
+    const warning = document.createElement('div'); warning.textContent = 'No foliage meshes identified: inspect mesh names below; visibility button will have no effect.'; panel.appendChild(warning);
+  }
+  const report = document.createElement('pre'); report.style.cssText = 'white-space:pre-wrap;word-break:break-word;font:11px/1.4 monospace';
+  report.textContent = rows.map(row => `${row.foliage ? '[F]' : '[W]'} ${row.mesh}\n  ${row.material} · ${row.triangles.toLocaleString()} tris`).join('\n'); panel.appendChild(report);
+  let elapsed = 0;
+  scene.onAfterRenderObservable.add(() => {
+    elapsed += scene.getEngine().getDeltaTime();
+    if (elapsed > 500) { fps.textContent = `${Math.round(scene.getEngine().getFps())} FPS · one tree; ground/shelter unchanged`; elapsed = 0; }
   });
-  scene.onDisposeObservable.add(() => container.dispose());
-  console.info(`Placed ${trees.length} authored pine instances. Distance culling is enabled; mesh LOD and impostors are not yet supplied.`);
+  scene.onDisposeObservable.add(() => { marker.dispose(); markerMaterial.dispose(); container.dispose(); });
 }
