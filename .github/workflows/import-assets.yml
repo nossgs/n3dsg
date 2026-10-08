@@ -1,33 +1,203 @@
 name: Import forest assets
+
 on:
   workflow_dispatch:
+
 permissions:
   contents: write
+
 concurrency:
   group: forest-asset-import
   cancel-in-progress: false
+
 jobs:
   import:
     runs-on: ubuntu-latest
+
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
+
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+
       - name: Import ground and foliage textures
         run: node scripts/fetch-forest-assets.mjs
-      - name: Import complete tree asset
-        run: node scripts/import-tree-assets.mjs
-      - name: Commit imported assets
+
+      - name: Download source tree into temporary storage
+        run: |
+          node scripts/import-tree-assets.mjs
+          mkdir -p "$RUNNER_TEMP/tree-source"
+          mv public/assets/trees "$RUNNER_TEMP/tree-source/assets"
+
+      - name: Install asset preparation tools
+        run: npm install --global @gltf-transform/cli@4.5.0
+
+      - name: Inspect and prepare runtime tree
+        run: |
+          SOURCE="$RUNNER_TEMP/tree-source/assets/pine_tree_01/model/pine_tree_01_1k.gltf"
+          WORK="$RUNNER_TEMP/tree-work"
+          OUTPUT="public/assets/trees/pine_tree_01/pine-runtime.glb"
+
+          test -f "$SOURCE"
+          mkdir -p "$WORK" public/assets/trees/pine_tree_01
+
+          gltf-transform inspect "$SOURCE"
+
+          gltf-transform dedup \
+            "$SOURCE" \
+            "$WORK/deduplicated.glb"
+
+          gltf-transform weld \
+            "$WORK/deduplicated.glb" \
+            "$WORK/welded.glb"
+
+          gltf-transform simplify \
+            "$WORK/welded.glb" \
+            "$WORK/simplified.glb" \
+            --ratio 0.01 \
+            --error 0.002
+
+          gltf-transform prune \
+            "$WORK/simplified.glb" \
+            "$OUTPUT"
+
+          gltf-transform inspect "$OUTPUT"
+
+      - name: Check runtime budget and write manifest
+        run: |
+          node --input-type=module <<'NODE'
+          import {
+            readFileSync,
+            writeFileSync
+          } from 'node:fs';
+          import { createHash } from 'node:crypto';
+
+          const root = 'public/assets/trees';
+          const relative = 'pine_tree_01/pine-runtime.glb';
+          const bytes = readFileSync(`${root}/${relative}`);
+
+          const maxBytes = 20 * 1024 * 1024;
+          const maxTriangles = 40000;
+
+          if (bytes.length > maxBytes) {
+            throw new Error(
+              `Prepared tree is ${(bytes.length / 1048576).toFixed(1)} MiB. ` +
+              'Budget is 20 MiB. Source is not ready for this game.'
+            );
+          }
+
+          if (bytes.readUInt32LE(0) !== 0x46546c67) {
+            throw new Error('Invalid GLB header.');
+          }
+
+          let document;
+
+          for (let offset = 12; offset + 8 <= bytes.length;) {
+            const length = bytes.readUInt32LE(offset);
+            const type = bytes.readUInt32LE(offset + 4);
+
+            if (type === 0x4e4f534a) {
+              document = JSON.parse(
+                bytes
+                  .subarray(offset + 8, offset + 8 + length)
+                  .toString('utf8')
+                  .replace(/\0+$/, '')
+              );
+              break;
+            }
+
+            offset += 8 + length;
+          }
+
+          if (!document) {
+            throw new Error('GLB JSON chunk missing.');
+          }
+
+          let triangles = 0;
+
+          for (const mesh of document.meshes ?? []) {
+            for (const primitive of mesh.primitives ?? []) {
+              const mode = primitive.mode ?? 4;
+
+              if (mode !== 4) {
+                throw new Error(
+                  'Unexpected non-triangle primitive; budget check needs review.'
+                );
+              }
+
+              const accessorIndex =
+                primitive.indices ?? primitive.attributes?.POSITION;
+
+              const count =
+                document.accessors?.[accessorIndex]?.count ?? 0;
+
+              triangles += count / 3;
+            }
+          }
+
+          if (triangles > maxTriangles) {
+            throw new Error(
+              `Prepared tree has ${Math.ceil(triangles)} triangles. ` +
+              `Budget is ${maxTriangles}. Source needs further preparation.`
+            );
+          }
+
+          const source = 'https://polyhaven.com/a/pine_tree_01';
+
+          const manifest = {
+            license: 'CC0-1.0',
+            trees: {
+              pine: {
+                asset: 'pine_tree_01',
+                file: relative,
+                source,
+                bytes: bytes.length,
+                triangles: Math.ceil(triangles),
+                sha256: createHash('sha256')
+                  .update(bytes)
+                  .digest('hex'),
+                preparation: {
+                  simplifyRatio: 0.01,
+                  simplifyError: 0.002,
+                  visuallyValidated: false
+                }
+              }
+            }
+          };
+
+          writeFileSync(
+            `${root}/manifest.json`,
+            JSON.stringify(manifest, null, 2) + '\n'
+          );
+
+          writeFileSync(
+            `${root}/ASSET-SOURCES.txt`,
+            `Poly Haven — CC0-1.0\n${source}\n`
+          );
+
+          console.log({
+            bytes: bytes.length,
+            triangles: Math.ceil(triangles)
+          });
+          NODE
+
+      - name: Commit prepared assets
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add public/assets/forest public/assets/trees
+
           if git diff --cached --quiet; then
             echo "Assets unchanged."
             exit 0
           fi
-          git commit -m "Import forest textures and complete pine asset"
+
+          git commit -m "Import prepared forest runtime assets"
           git push origin HEAD:main
