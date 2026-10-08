@@ -60,8 +60,8 @@ jobs:
           gltf-transform simplify \
             "$WORK/welded.glb" \
             "$WORK/simplified.glb" \
-            --ratio 0.01 \
-            --error 0.002
+            --ratio 0.002 \
+            --error 0.01
 
           gltf-transform prune \
             "$WORK/simplified.glb" \
