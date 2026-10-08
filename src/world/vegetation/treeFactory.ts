@@ -1,4 +1,4 @@
-import { AbstractMesh, Color3, Material, Mesh, MeshBuilder, MultiMaterial, PBRMaterial, Scene, SceneLoader, ShadowGenerator, StandardMaterial, Texture, TransformNode, Vector3 } from '@babylonjs/core';
+import { AbstractMesh, BaseTexture, Color3, Material, MeshBuilder, MultiMaterial, PBRMaterial, Scene, SceneLoader, ShadowGenerator, StandardMaterial, Texture, TransformNode, Vector3 } from '@babylonjs/core';
 import '@babylonjs/loaders/glTF';
 import { groundHeight } from '../terrain/terrain';
 const base = (import.meta as ImportMeta & { env: { BASE_URL: string } }).env.BASE_URL;
@@ -6,11 +6,10 @@ type SavedMaterial = {
   material: Material;
   transparency: number | null;
   alpha: number;
-  opacity: Texture | null;
+  opacity: BaseTexture | null;
   fromAlbedo?: boolean;
   fromDiffuse?: boolean;
 };
-
 export function buildTrees(scene: Scene, shadows: ShadowGenerator): void {
   const panel = document.createElement('div');
   panel.style.cssText = 'position:fixed;left:12px;top:12px;z-index:60;width:350px;max-height:70vh;overflow:auto;background:#101914ee;color:#eef4e8;padding:12px;border:1px solid #748473;border-radius:5px;font:12px/1.5 monospace;pointer-events:auto';
@@ -49,15 +48,14 @@ async function loadDiagnostic(scene: Scene, shadows: ShadowGenerator, panel: HTM
   placement.scaling.setAll(18 / height);
   const x = -10, z = -1;
   placement.position.set(x, groundHeight(x, z), z);
-  // Measure again after all parent transforms, then align the actual lowest geometry.
   const planted = bounds(); placement.position.y += groundHeight(x, z) - planted.min.y;
   bounds();
   for (const mesh of meshes) { mesh.isPickable = false; mesh.receiveShadows = true; }
-
   const materialSet = new Set<Material>();
   for (const mesh of meshes) {
-    if (mesh.material instanceof MultiMaterial) for (const sub of mesh.material.subMaterials) { if (sub) materialSet.add(sub); }
-    else if (mesh.material) materialSet.add(mesh.material);
+    if (mesh.material instanceof MultiMaterial) {
+      for (const sub of mesh.material.subMaterials) if (sub) materialSet.add(sub);
+    } else if (mesh.material) materialSet.add(mesh.material);
   }
   const materialHasCutout = (material: Material | null): boolean => {
     if (!material) return false;
@@ -77,7 +75,7 @@ async function loadDiagnostic(scene: Scene, shadows: ShadowGenerator, panel: HTM
   const saved: SavedMaterial[] = [];
   for (const material of materialSet) {
     if (material instanceof PBRMaterial) {
-      saved.push({ material, transparency: material.transparencyMode, alpha: material.alpha, opacity: material.opacityTexture as Texture | null, fromAlbedo: material.useAlphaFromAlbedoTexture });
+      saved.push({ material, transparency: material.transparencyMode, alpha: material.alpha, opacity: material.opacityTexture, fromAlbedo: material.useAlphaFromAlbedoTexture });
       if (material.albedoTexture instanceof Texture && !textures.has(material.albedoTexture)) textures.set(material.albedoTexture, material.albedoTexture.hasAlpha);
     } else if (material instanceof StandardMaterial) {
       saved.push({ material, transparency: material.transparencyMode, alpha: material.alpha, opacity: material.opacityTexture, fromDiffuse: material.useAlphaFromDiffuseTexture });
@@ -87,28 +85,29 @@ async function loadDiagnostic(scene: Scene, shadows: ShadowGenerator, panel: HTM
   let cutouts = true, foliageVisible = true, treeShadows = false;
   const applyCutouts = () => {
     for (const [texture, hasAlpha] of textures) texture.hasAlpha = cutouts ? hasAlpha : false;
-    for (const savedMaterial of saved) {
-      const material = savedMaterial.material;
-      material.transparencyMode = cutouts ? savedMaterial.transparency : Material.MATERIAL_OPAQUE;
-      material.alpha = cutouts ? savedMaterial.alpha : 1;
+    for (const snapshot of saved) {
+      const material = snapshot.material;
+      material.transparencyMode = cutouts ? snapshot.transparency : Material.MATERIAL_OPAQUE;
+      material.alpha = cutouts ? snapshot.alpha : 1;
       if (material instanceof PBRMaterial) {
-        material.opacityTexture = cutouts ? savedMaterial.opacity : null;
-        material.useAlphaFromAlbedoTexture = cutouts ? Boolean(savedMaterial.fromAlbedo) : false;
+        material.opacityTexture = cutouts ? snapshot.opacity : null;
+        material.useAlphaFromAlbedoTexture = cutouts ? Boolean(snapshot.fromAlbedo) : false;
       } else if (material instanceof StandardMaterial) {
-        material.opacityTexture = cutouts ? savedMaterial.opacity : null;
-        material.useAlphaFromDiffuseTexture = cutouts ? Boolean(savedMaterial.fromDiffuse) : false;
+        material.opacityTexture = cutouts ? snapshot.opacity : null;
+        material.useAlphaFromDiffuseTexture = cutouts ? Boolean(snapshot.fromDiffuse) : false;
       }
       material.markAsDirty(63);
     }
   };
   const applyShadows = () => {
-    for (const mesh of meshes) { if (treeShadows) shadows.addShadowCaster(mesh); else shadows.removeShadowCaster(mesh); }
+    for (const mesh of meshes) {
+      if (treeShadows) shadows.addShadowCaster(mesh); else shadows.removeShadowCaster(mesh);
+    }
   };
-
   const marker = MeshBuilder.CreateBox('tree-ground-reference', { width: 2, depth: 2, height: 0.02 }, scene);
   marker.position.set(x, groundHeight(x, z) + 0.015, z); marker.isPickable = false;
-  const markerMaterial = new StandardMaterial('ground-reference', scene); markerMaterial.diffuseColor = new Color3(0.9, 0.22, 0.12);
-  markerMaterial.emissiveColor = new Color3(0.3, 0.04, 0.01); marker.material = markerMaterial;
+  const markerMaterial = new StandardMaterial('ground-reference', scene);
+  markerMaterial.diffuseColor = new Color3(0.9, 0.22, 0.12); markerMaterial.emissiveColor = new Color3(0.3, 0.04, 0.01); marker.material = markerMaterial;
   panel.textContent = '';
   const heading = document.createElement('div'); heading.textContent = 'SINGLE TREE DIAGNOSTIC'; panel.appendChild(heading);
   const instructions = document.createElement('div'); instructions.textContent = 'Tree: left of shelter, x=-10 z=-1. Red square marks ground. Esc releases mouse for controls.'; panel.appendChild(instructions);
