@@ -19,6 +19,8 @@ jobs:
         with:
           node-version: '22'
       - run: npm install
+      - name: Download forest textures
+        run: node scripts/fetch-forest-assets.mjs
       - run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
