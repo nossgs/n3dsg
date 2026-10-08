@@ -65,7 +65,12 @@ jobs:
 
           gltf-transform prune \
             "$WORK/simplified.glb" \
-            "$OUTPUT"
+            "$WORK/pruned.glb"
+
+          gltf-transform webp \
+            "$WORK/pruned.glb" \
+            "$OUTPUT" \
+            --quality 85
 
           gltf-transform inspect "$OUTPUT"
 
