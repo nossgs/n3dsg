@@ -1,0 +1,31 @@
+name: Import forest assets
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: forest-asset-import
+  cancel-in-progress: false
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Download selected assets
+        run: node scripts/fetch-forest-assets.mjs
+      - name: Commit assets to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/assets/forest
+          if git diff --cached --quiet; then
+            echo "Assets are already up to date."
+            exit 0
+          fi
+          git commit -m "Import pinned forest texture assets"
+          git push origin HEAD:main
