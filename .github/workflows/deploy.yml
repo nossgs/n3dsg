@@ -1,7 +1,5 @@
 name: Build and deploy game
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
