@@ -1,10 +1,14 @@
 import { Mesh, Scene, VertexData } from '@babylonjs/core';
 import { createGroundMaterial } from '../../graphics/groundMaterial';
 export const WORLD_BOUNDARY = 189;
-const SIZE = 384, CELLS = 96, STEP = 4;
+const SIZE = 384, CELLS = 128, STEP = SIZE / CELLS;
 function elevation(x: number, z: number): number {
   const t = Math.max(0, Math.min(1, (Math.hypot(x, z - 6) - 15) / 32));
-  return (Math.sin(x / 29) * 3 + Math.cos(z / 37) * 3 + Math.sin((x + z) / 13) * 0.6) * t * t * (3 - 2 * t);
+  const base = Math.sin(x / 29) * 3 + Math.cos(z / 37) * 3 + Math.sin((x + z) / 13) * 0.6;
+  const ridge = 7 * Math.exp(-(((x - 40) / 18) ** 2 + ((z - 20) / 42) ** 2));
+  const hollow = -3 * Math.exp(-(((x + 28) / 17) ** 2 + ((z - 25) / 22) ** 2));
+  const hummocks = Math.sin(x / 6.5) * Math.cos(z / 8) * 0.55;
+  return (base + ridge + hollow + hummocks) * t * t * (3 - 2 * t);
 }
 export function groundHeight(x: number, z: number): number {
   const gx = Math.max(0, Math.min(CELLS - 0.00001, (x + SIZE / 2) / STEP));
