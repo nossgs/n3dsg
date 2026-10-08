@@ -3,7 +3,7 @@ import { createForestMaterial } from '../../graphics/forestMaterials';
 import { seededRandom } from '../generation/random';
 import { groundHeight } from '../terrain/terrain';
 type Geometry = { positions: number[]; indices: number[]; normals: number[]; colors: number[]; uvs: number[] };
-type Settings = { seed: number; width: number; density: number; crownBase: number; levels: number; fill: number };
+type Settings = { seed: number; width: number; density: number; crownBase: number; groups: number; fill: number };
 const empty = (): Geometry => ({ positions: [], indices: [], normals: [], colors: [], uvs: [] });
 function tube(data: Geometry, points: Vector3[], radii: number[], sides: number, shade: number): void {
   const first = data.positions.length / 3; let distance = 0;
@@ -15,8 +15,8 @@ function tube(data: Geometry, points: Vector3[], radii: number[], sides: number,
     for (let vertex = 0; vertex <= sides; vertex++) {
       const angle = vertex / sides * Math.PI * 2, radial = side.scale(Math.cos(angle)).add(other.scale(Math.sin(angle)));
       const p = points[ring].add(radial.scale(radii[ring]));
-      data.positions.push(p.x, p.y, p.z); data.normals.push(radial.x, radial.y, radial.z);
-      data.colors.push(shade, shade, shade, 1); data.uvs.push(vertex / sides * Math.PI * radii[ring] * 2 / 1.5, distance / 1.5);
+      data.positions.push(p.x, p.y, p.z); data.normals.push(radial.x, radial.y, radial.z); data.colors.push(shade, shade, shade, 1);
+      data.uvs.push(vertex / sides * Math.PI * radii[ring] * 2 / 1.5, distance / 1.5);
       if (ring < points.length - 1 && vertex < sides) {
         const a = first + ring * (sides + 1) + vertex, b = a + 1, c = a + sides + 1, d = c + 1;
         data.indices.push(a, b, c, b, d, c);
@@ -38,15 +38,15 @@ function meshFrom(scene: Scene, name: string, data: Geometry): Mesh {
   const vertex = new VertexData(); vertex.positions = data.positions; vertex.indices = data.indices; vertex.normals = data.normals; vertex.colors = data.colors; vertex.uvs = data.uvs;
   const mesh = new Mesh(name, scene); vertex.applyToMesh(mesh); mesh.isPickable = false; mesh.receiveShadows = true; return mesh;
 }
-function generate(settings: Settings): { wood: Geometry; needles: Geometry; shoots: number; branchlets: number } {
+function generate(settings: Settings): { wood: Geometry; needles: Geometry; shoots: number; branchlets: number; majorBranches: number } {
   const random = seededRandom(settings.seed), wood = empty(), needles = empty();
   const height = 18, leanX = (random() - 0.5) * 0.65, leanZ = (random() - 0.5) * 0.45;
   const trunk = (y: number) => new Vector3(leanX * (y / height) ** 1.5, y, leanZ * (y / height) ** 1.7);
-  const points: Vector3[] = [], radii: number[] = [];
+  const trunkPoints: Vector3[] = [], trunkRadii: number[] = [];
   for (let ring = 0; ring <= 14; ring++) {
-    const t = ring / 14; points.push(trunk(height * t)); radii.push(0.018 + 0.31 * (1 - t) ** 1.05 + (ring === 0 ? 0.13 : ring === 1 ? 0.035 : 0));
+    const t = ring / 14; trunkPoints.push(trunk(height * t)); trunkRadii.push(0.018 + 0.31 * (1 - t) ** 1.05 + (ring === 0 ? 0.13 : ring === 1 ? 0.035 : 0));
   }
-  tube(wood, points, radii, 10, 1);
+  tube(wood, trunkPoints, trunkRadii, 10, 1);
   let shoots = 0, branchlets = 0;
   function shoot(start: Vector3, direction: Vector3, length: number, fullness = 1): void {
     const axis = direction.normalize(), end = start.add(axis.scale(length));
@@ -55,100 +55,106 @@ function generate(settings: Settings): { wood: Geometry; needles: Geometry; shoo
     const side = Vector3.Cross(axis, helper).normalize(), other = Vector3.Cross(axis, side).normalize();
     const nodes = Math.max(5, Math.round(8 * settings.density * fullness));
     for (let node = 0; node < nodes; node++) {
-      const t = 0.07 + node / nodes * 0.87, center = start.add(axis.scale(length * t));
-      const spiral = node * 2.399963 + random() * 0.45;
+      const t = 0.07 + node / nodes * 0.87, center = start.add(axis.scale(length * t)), spiral = node * 2.399963 + random() * 0.45;
       for (let bundle = 0; bundle < 3; bundle++) {
-        const angle = spiral + bundle * Math.PI * 2 / 3;
-        const radial = side.scale(Math.cos(angle)).add(other.scale(Math.sin(angle))), attachment = center.add(radial.scale(0.006));
+        const angle = spiral + bundle * Math.PI * 2 / 3, radial = side.scale(Math.cos(angle)).add(other.scale(Math.sin(angle)));
+        const attachment = center.add(radial.scale(0.006));
         for (let n = 0; n < 2; n++) {
           const outward = radial.add(side.scale((n - 0.5) * 0.22)).normalize();
           const length = (0.115 + random() * 0.075) * (0.85 + Math.sin(t * Math.PI) * 0.2);
-          const tip = attachment.add(outward.scale(length * 0.78)).add(axis.scale(length * 0.65));
-          const tone = 0.78 + random() * 0.35;
+          const tip = attachment.add(outward.scale(length * 0.78)).add(axis.scale(length * 0.65)), tone = 0.78 + random() * 0.35;
           needle(needles, attachment, tip, 0.009 + random() * 0.005, outward, new Color3(0.18 * tone, 0.30 * tone, 0.13 * tone));
         }
       }
     }
     shoots++;
   }
-  const sample = (path: Vector3[], t: number): Vector3 => {
+  const sample = (path: Vector3[], t: number) => {
     const value = Math.max(0, Math.min(1, t)) * (path.length - 1), index = Math.min(path.length - 2, Math.floor(value));
     return Vector3.Lerp(path[index], path[index + 1], value - index);
   };
-  for (let level = 0; level < settings.levels; level++) {
-    const crownT = level / settings.levels, y = height * (settings.crownBase + crownT * (0.93 - settings.crownBase)) + (random() - 0.5) * 0.3;
-    const span = settings.width * (1 - crownT) ** 0.72 + 0.18, spokes = crownT > 0.73 ? 4 : 5 + level % 2;
-    for (let spoke = 0; spoke < spokes; spoke++) {
-      const angle = spoke * Math.PI * 2 / spokes + level * 2.399963 + (random() - 0.5) * 0.35;
-      const radial = new Vector3(Math.cos(angle), 0, Math.sin(angle));
-      const length = span * (0.78 + random() * 0.34), start = trunk(y + (random() - 0.5) * 0.35);
-      const droop = 0.6 * (1 - crownT), upturn = 0.35 + crownT * 0.4, limb: Vector3[] = [];
-      for (let joint = 0; joint <= 5; joint++) {
-        const t = joint / 5, p = start.add(radial.scale(length * t)); p.y += -droop * Math.sin(t * Math.PI * 0.8) + upturn * t ** 3; limb.push(p);
-      }
-      const radius = 0.055 * (1 - crownT * 0.75); tube(wood, limb, limb.map((_, i) => radius * (1 - i / 6) + 0.004), 5, 0.93);
-      const sideways = new Vector3(-radial.z, 0, radial.x);
-      const pairs = crownT > 0.73 ? 2 : settings.fill > 0.8 ? 4 : 3;
-      for (let pair = 0; pair < pairs; pair++) {
-        // Cover the inner crown as well as outer branch tips.
-        const attachment = sample(limb, 0.20 + pair / pairs * 0.65);
-        for (const sign of [-1, 1]) {
-          if (level === 0 && random() < 0.04) continue;
-          const extension = (0.42 + length * 0.16) * (0.75 + random() * 0.4);
-          const vertical = settings.fill > 0 ? (pair % 2 ? -0.16 : 0.24) : 0.12;
-          const direction = radial.scale(0.45).add(sideways.scale(sign * 0.8)).add(new Vector3(0, vertical + crownT * 0.2, 0)).normalize();
-          const end = attachment.add(direction.scale(extension));
-          tube(wood, [attachment, Vector3.Lerp(attachment, end, 0.5), end], [0.018, 0.011, 0.004], 4, 0.88);
-          if (settings.fill < 0.1) {
-            const tufts = Math.max(2, Math.round(3 * settings.density));
-            for (let tuft = 0; tuft < tufts; tuft++) {
-              const t = 0.22 + tuft / tufts * 0.69;
-              const direction2 = direction.add(radial.scale((tuft % 2 ? -1 : 1) * 0.35)).add(new Vector3(0, 0.15, 0)).normalize();
-              shoot(Vector3.Lerp(attachment, end, t), direction2, 0.34 + random() * 0.22);
-            }
-          } else {
-            // Tertiary branchlets are real connected limbs, with shoots along their lengths.
-            const count = Math.max(2, Math.round((2.1 + settings.fill) * (crownT > 0.8 ? 0.75 : 1)));
-            for (let twig = 0; twig < count; twig++) {
-              const t = 0.18 + twig / count * 0.68, joint = Vector3.Lerp(attachment, end, t);
-              const twigSide = Vector3.Cross(direction, Vector3.Up()).normalize();
-              const alternate = twig % 2 ? -1 : 1;
-              const twigDirection = direction.scale(0.55).add(twigSide.scale(alternate * 0.75)).add(new Vector3(0, (twig % 3 - 1) * 0.22 + 0.12, 0)).normalize();
-              const twigLength = (0.28 + random() * 0.18) * (1 + settings.fill * 0.12);
-              const twigEnd = joint.add(twigDirection.scale(twigLength));
-              tube(wood, [joint, twigEnd], [0.011, 0.004], 4, 0.87); branchlets++;
-              shoot(joint, twigDirection, twigLength, 0.85);
-              shoot(twigEnd, twigDirection.add(new Vector3(0, 0.18, 0)), 0.36 + random() * 0.16);
-              if (settings.fill > 1.35 && twig % 2 === 0) shoot(Vector3.Lerp(joint, twigEnd, 0.55), radial.add(twigSide.scale(-alternate * 0.6)).add(new Vector3(0, -0.06, 0)), 0.32, 0.85);
-            }
-          }
-          shoot(end, direction.add(new Vector3(0, 0.2, 0)), 0.44 + random() * 0.18);
-        }
-      }
-      shoot(limb[5], radial.add(new Vector3(0, 0.35 + crownT * 0.3, 0)), 0.52 + random() * 0.18);
+  // A single ordered sequence of branch attachments: no shared horizontal whorls.
+  const majorBranches = settings.groups * 5;
+  const gaps = Array.from({ length: majorBranches - 1 }, () => 0.65 + random() * 0.7);
+  const gapTotal = gaps.reduce((sum, value) => sum + value, 0);
+  let cumulative = 0;
+  const startY = height * settings.crownBase, endY = height - 0.22;
+  const phase = random() * Math.PI * 2;
+  for (let branch = 0; branch < majorBranches; branch++) {
+    if (branch) cumulative += gaps[branch - 1];
+    const crownT = cumulative / gapTotal, y = startY + crownT * (endY - startY);
+    const taper = Math.max(0.1, 1 - crownT * 0.76);
+    const span = settings.width * (1 - crownT) ** 0.72 + 0.09;
+    const angle = phase + branch * 2.399963 + (random() - 0.5) * 0.6;
+    const radial = new Vector3(Math.cos(angle), 0, Math.sin(angle));
+    const length = span * (0.78 + random() * 0.34), start = trunk(y);
+    const droop = (0.3 + random() * 0.55) * (1 - crownT);
+    const upturn = 0.20 + random() * 0.55;
+    const sideways = new Vector3(-radial.z, 0, radial.x), limb: Vector3[] = [];
+    for (let joint = 0; joint <= 5; joint++) {
+      const t = joint / 5, p = start.add(radial.scale(length * t));
+      p.y += (-droop * Math.sin(t * Math.PI * 0.8) + upturn * t ** 3) * taper;
+      p.addInPlace(sideways.scale(Math.sin(t * Math.PI) * (random() - 0.5) * 0.13)); limb.push(p);
     }
+    const radius = 0.055 * (1 - crownT * 0.75);
+    tube(wood, limb, limb.map((_, i) => radius * (1 - i / 6) + 0.004), 5, 0.93);
+    const pairs = crownT > 0.82 ? 1 : crownT > 0.65 ? 2 : settings.fill > 0.8 ? 4 : 3;
+    for (let pair = 0; pair < pairs; pair++) {
+      const attachment = sample(limb, 0.18 + pair / pairs * 0.65);
+      for (const sign of [-1, 1]) {
+        if (crownT < 0.08 && random() < 0.04) continue;
+        const extension = (0.42 + length * 0.16) * (0.75 + random() * 0.4) * taper;
+        const vertical = -0.32 + random() * 0.85;
+        const direction = radial.scale(0.45).add(sideways.scale(sign * 0.8)).add(new Vector3(0, vertical, 0)).normalize();
+        const end = attachment.add(direction.scale(extension));
+        tube(wood, [attachment, Vector3.Lerp(attachment, end, 0.5), end], [0.018 * taper, 0.011 * taper, 0.003], 4, 0.88);
+        if (settings.fill < 0.1) {
+          const tufts = Math.max(2, Math.round(3 * settings.density));
+          for (let tuft = 0; tuft < tufts; tuft++) {
+            const t = 0.22 + tuft / tufts * 0.69;
+            const direction2 = direction.add(radial.scale((tuft % 2 ? -1 : 1) * 0.35)).add(new Vector3(0, -0.10 + random() * 0.55, 0)).normalize();
+            shoot(Vector3.Lerp(attachment, end, t), direction2, (0.34 + random() * 0.22) * taper);
+          }
+        } else {
+          const count = Math.max(2, Math.round((2.1 + settings.fill) * (crownT > 0.8 ? 0.65 : 1)));
+          for (let twig = 0; twig < count; twig++) {
+            const t = 0.18 + twig / count * 0.68, joint = Vector3.Lerp(attachment, end, t);
+            const twigSide = Vector3.Cross(direction, Vector3.Up()).normalize(), alternate = twig % 2 ? -1 : 1;
+            const twigDirection = direction.scale(0.55).add(twigSide.scale(alternate * 0.75)).add(new Vector3(0, -0.25 + random() * 0.7, 0)).normalize();
+            const twigLength = (0.28 + random() * 0.18) * (1 + settings.fill * 0.12) * taper, twigEnd = joint.add(twigDirection.scale(twigLength));
+            tube(wood, [joint, twigEnd], [0.011 * taper, 0.003], 4, 0.87); branchlets++;
+            shoot(joint, twigDirection, twigLength, 0.85);
+            shoot(twigEnd, twigDirection.add(new Vector3(0, -0.08 + random() * 0.45, 0)), (0.36 + random() * 0.16) * taper);
+            if (settings.fill > 1.35 && twig % 2 === 0) shoot(Vector3.Lerp(joint, twigEnd, 0.55), radial.add(twigSide.scale(-alternate * 0.6)).add(new Vector3(0, -0.12 + random() * 0.4, 0)), 0.32 * taper, 0.85);
+          }
+        }
+        shoot(end, direction.add(new Vector3(0, 0.18, 0)), (0.44 + random() * 0.18) * taper);
+      }
+    }
+    shoot(limb[5], radial.add(new Vector3(0, 0.20 + random() * 0.45, 0)), (0.52 + random() * 0.18) * taper);
   }
-  for (let tip = 0; tip < 7; tip++) {
-    const angle = tip * 2.4; shoot(trunk(17.3 + tip * 0.08), new Vector3(Math.cos(angle) * 0.3, 1, Math.sin(angle) * 0.3), 0.5, 0.8);
+  // Continuous terminal foliage around the same leader, not a detached top tuft.
+  for (let tip = 0; tip < 13; tip++) {
+    const t = tip / 12, y = 16.65 + t * 1.35, angle = phase + tip * 2.399963;
+    const lateral = 0.5 * (1 - t) + 0.08;
+    shoot(trunk(y), new Vector3(Math.cos(angle) * lateral, 0.6 + t * 0.4, Math.sin(angle) * lateral), 0.42 - t * 0.18, 0.8);
   }
   for (let limb = 0; limb < 3; limb++) {
     const angle = limb * 2.4 + random() * 0.5, start = trunk(height * settings.crownBase * (0.5 + limb * 0.14));
     const end = start.add(new Vector3(Math.cos(angle) * (0.65 + random() * 0.35), -0.15, Math.sin(angle) * (0.65 + random() * 0.35)));
     tube(wood, [start, Vector3.Lerp(start, end, 0.55), end], [0.025, 0.014, 0.003], 5, 0.85);
   }
-  return { wood, needles, shoots, branchlets };
+  return { wood, needles, shoots, branchlets, majorBranches };
 }
 export function buildTrees(scene: Scene, shadows: ShadowGenerator): void {
-  const bark = createForestMaterial(scene, 'bark');
-  const foliage = new StandardMaterial('procedural-pine-needles', scene);
-  foliage.diffuseColor = Color3.White(); foliage.specularColor = new Color3(0.025, 0.035, 0.02); foliage.specularPower = 24;
-  foliage.backFaceCulling = false; foliage.twoSidedLighting = true;
-  const settings: Settings = { seed: 7619, width: 3.25, density: 1.15, crownBase: 0.14, levels: 12, fill: 1.1 };
+  const bark = createForestMaterial(scene, 'bark'), foliage = new StandardMaterial('procedural-pine-needles', scene);
+  foliage.diffuseColor = Color3.White(); foliage.specularColor = new Color3(0.025, 0.035, 0.02); foliage.specularPower = 24; foliage.backFaceCulling = false; foliage.twoSidedLighting = true;
+  const settings: Settings = { seed: 7619, width: 3.25, density: 1.15, crownBase: 0.14, groups: 12, fill: 1.1 };
   let wood: Mesh | undefined, needles: Mesh | undefined, casts = false, visible = true;
   const x = -10, z = -1;
   const panel = document.createElement('div'); panel.style.cssText = 'position:fixed;left:12px;top:12px;z-index:60;width:330px;max-height:70vh;overflow:auto;background:#101914ee;color:#eef4e8;padding:12px;border:1px solid #748473;border-radius:5px;font:12px/1.5 monospace;pointer-events:auto'; document.body.appendChild(panel);
-  const title = document.createElement('div'); title.textContent = 'PROCEDURAL CONIFER — CROWN VOLUME'; panel.appendChild(title);
-  const info = document.createElement('div'); info.textContent = 'x=-10 z=-1. Esc releases mouse. One detailed tree, not a forest-ready LOD.'; panel.appendChild(info);
+  const title = document.createElement('div'); title.textContent = 'PROCEDURAL CONIFER — CONTINUOUS CROWN'; panel.appendChild(title);
+  const info = document.createElement('div'); info.textContent = 'x=-10 z=-1. Esc releases mouse. Staggered branch attachments; single-tree test.'; panel.appendChild(info);
   const fps = document.createElement('div'), counts = document.createElement('div'); panel.append(fps, counts); counts.style.whiteSpace = 'pre-line';
   function applyShadows(): void {
     for (const mesh of [wood, needles]) if (mesh) { if (casts && mesh.isEnabled()) shadows.addShadowCaster(mesh); else shadows.removeShadowCaster(mesh); }
@@ -161,8 +167,8 @@ export function buildTrees(scene: Scene, shadows: ShadowGenerator): void {
     for (const mesh of [wood, needles]) mesh.position.set(x, groundHeight(x, z), z);
     needles.setEnabled(visible); applyShadows();
     const wt = result.wood.indices.length / 3, nt = result.needles.indices.length / 3;
-    counts.textContent = `Seed ${settings.seed} · ${result.shoots} shoots\n${result.branchlets} tertiary branchlets · ${settings.levels} tiers\nWood ${wt.toLocaleString()} tris · needles ${nt.toLocaleString()} tris\nTotal ${(wt + nt).toLocaleString()} tris · 2 meshes`;
-    console.info('Procedural crown', { ...settings, shoots: result.shoots, branchlets: result.branchlets, woodTriangles: wt, needleTriangles: nt });
+    counts.textContent = `Seed ${settings.seed} · ${result.majorBranches} staggered limbs\n${result.branchlets} branchlets · ${result.shoots} shoots\nWood ${wt.toLocaleString()} tris · needles ${nt.toLocaleString()} tris\nTotal ${(wt + nt).toLocaleString()} tris · 2 meshes`;
+    console.info('Continuous procedural crown', { ...settings, majorBranches: result.majorBranches, branchlets: result.branchlets, shoots: result.shoots, woodTriangles: wt, needleTriangles: nt });
   }
   let timer: ReturnType<typeof setTimeout> | undefined;
   const syncs: (() => void)[] = [];
@@ -177,14 +183,14 @@ export function buildTrees(scene: Scene, shadows: ShadowGenerator): void {
   slider('Needle density', 0.5, 1.6, 0.05, () => settings.density, value => settings.density = value);
   slider('Branchlet fill', 0, 1.8, 0.1, () => settings.fill, value => settings.fill = value);
   slider('Live crown start (height fraction)', 0.08, 0.4, 0.01, () => settings.crownBase, value => settings.crownBase = value);
-  slider('Branch tiers', 8, 15, 1, () => settings.levels, value => settings.levels = Math.round(value));
+  slider('Branch budget (x5 limbs, not tiers)', 8, 15, 1, () => settings.groups, value => settings.groups = Math.round(value));
   function button(label: string, click: (button: HTMLButtonElement) => void): void {
     const element = document.createElement('button'); element.textContent = label; element.style.cssText = 'display:block;width:100%;margin:8px 0;padding:7px;background:#314232;color:white;border:1px solid #71816e;cursor:pointer';
     element.onclick = () => { if (timer) clearTimeout(timer); click(element); }; panel.appendChild(element);
   }
   button('Generate next seed', () => { settings.seed++; rebuild(); });
   button('Sparse branchlet comparison', () => { settings.fill = 0; syncs.forEach(sync => sync()); rebuild(); });
-  button('Filled crown preset', () => { settings.fill = 1.1; settings.density = 1.15; settings.crownBase = 0.14; settings.levels = 12; syncs.forEach(sync => sync()); rebuild(); });
+  button('Filled continuous crown', () => { settings.fill = 1.1; settings.density = 1.15; settings.crownBase = 0.14; settings.groups = 12; syncs.forEach(sync => sync()); rebuild(); });
   button('Needles: ON', element => { visible = !visible; needles?.setEnabled(visible); applyShadows(); element.textContent = `Needles: ${visible ? 'ON' : 'OFF'}`; });
   button('Tree casting shadows: OFF', element => { casts = !casts; applyShadows(); element.textContent = `Tree casting shadows: ${casts ? 'ON' : 'OFF'}`; });
   const marker = MeshBuilder.CreateBox('tree-ground-reference', { width: 2, depth: 2, height: 0.02 }, scene); marker.position.set(x, groundHeight(x, z) + 0.015, z); marker.isPickable = false;
