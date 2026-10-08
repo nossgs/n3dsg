@@ -1,10 +1,38 @@
 import { Color3, Mesh, Scene, Vector3, VertexData } from '@babylonjs/core';
 import { seededRandom } from '../../../world/generation/random';
 
-export type Geometry = { positions: number[]; indices: number[]; normals: number[]; colors: number[]; uvs: number[] };
+export type Geometry = { positions: number[]; indices: number[]; normals: number[]; colors: number[]; uvs: number[]; recordOnly?: boolean; capture?: PineTube[] };
 export type Settings = { seed: number; width: number; density: number; crownBase: number; groups: number; fill: number };
+export type PineTube = {
+  points: Vector3[];
+  radii: number[];
+  sides: number;
+  shade: number;
+};
+
+export type PineShoot = {
+  start: Vector3;
+  direction: Vector3;
+  length: number;
+  fullness: number;
+};
+
+export type PineBlueprint = {
+  settings: Settings;
+  tubes: PineTube[];
+  shoots: PineShoot[];
+};
+
 const empty = (): Geometry => ({ positions: [], indices: [], normals: [], colors: [], uvs: [] });
 function tube(data: Geometry, points: Vector3[], radii: number[], sides: number, shade: number): void {
+  data.capture?.push({
+    points: points.map(point => point.clone()),
+    radii: [...radii],
+    sides,
+    shade
+  });
+
+  if (data.recordOnly) return;
   const first = data.positions.length / 3; let distance = 0;
   for (let ring = 0; ring < points.length; ring++) {
     if (ring) distance += Vector3.Distance(points[ring], points[ring - 1]);
@@ -24,6 +52,7 @@ function tube(data: Geometry, points: Vector3[], radii: number[], sides: number,
   }
 }
 function needle(data: Geometry, base: Vector3, tip: Vector3, width: number, outward: Vector3, color: Color3): void {
+  if (data.recordOnly) return;
   const axis = tip.subtract(base).normalize(); let edge = Vector3.Cross(axis, outward);
   if (edge.lengthSquared() < 0.00001) edge = Vector3.Cross(axis, Vector3.Up());
   if (edge.lengthSquared() < 0.00001) edge = Vector3.Right();
@@ -37,8 +66,22 @@ export function meshFrom(scene: Scene, name: string, data: Geometry): Mesh {
   const vertex = new VertexData(); vertex.positions = data.positions; vertex.indices = data.indices; vertex.normals = data.normals; vertex.colors = data.colors; vertex.uvs = data.uvs;
   const mesh = new Mesh(name, scene); vertex.applyToMesh(mesh); mesh.isPickable = false; mesh.receiveShadows = true; return mesh;
 }
-export function generate(settings: Settings): { wood: Geometry; needles: Geometry; shoots: number; branchlets: number; majorBranches: number } {
+export function generate(settings: Settings, recordOnly = false): {
+  wood: Geometry;
+  needles: Geometry;
+  shoots: number;
+  branchlets: number;
+  majorBranches: number;
+  blueprint: PineBlueprint;
+} {
   const random = seededRandom(settings.seed), wood = empty(), needles = empty();
+
+  const tubeRecords: PineTube[] = [];
+  const shootRecords: PineShoot[] = [];
+
+  wood.capture = tubeRecords;
+  wood.recordOnly = recordOnly;
+  needles.recordOnly = recordOnly;
   const height = 18, leanX = (random() - 0.5) * 0.65, leanZ = (random() - 0.5) * 0.45;
   const trunk = (y: number) => new Vector3(leanX * (y / height) ** 1.5, y, leanZ * (y / height) ** 1.7);
   const trunkPoints: Vector3[] = [], trunkRadii: number[] = [];
@@ -49,6 +92,13 @@ export function generate(settings: Settings): { wood: Geometry; needles: Geometr
   let shoots = 0, branchlets = 0;
   function shoot(start: Vector3, direction: Vector3, length: number, fullness = 1): void {
     const axis = direction.normalize(), end = start.add(axis.scale(length));
+
+    shootRecords.push({
+      start: start.clone(),
+      direction: axis.clone(),
+      length,
+      fullness
+    });
     tube(wood, [start, Vector3.Lerp(start, end, 0.5), end], [0.012, 0.008, 0.003], 4, 0.9);
     const helper = Math.abs(axis.y) > 0.95 ? Vector3.Right() : Vector3.Up();
     const side = Vector3.Cross(axis, helper).normalize(), other = Vector3.Cross(axis, side).normalize();
@@ -143,5 +193,12 @@ export function generate(settings: Settings): { wood: Geometry; needles: Geometr
     const end = start.add(new Vector3(Math.cos(angle) * (0.65 + random() * 0.35), -0.15, Math.sin(angle) * (0.65 + random() * 0.35)));
     tube(wood, [start, Vector3.Lerp(start, end, 0.55), end], [0.025, 0.014, 0.003], 5, 0.85);
   }
-  return { wood, needles, shoots, branchlets, majorBranches };
+  return {
+    wood,
+    needles,
+    shoots,
+    branchlets,
+    majorBranches,
+    blueprint: { settings: { ...settings }, tubes: tubeRecords, shoots: shootRecords }
+  };
 }

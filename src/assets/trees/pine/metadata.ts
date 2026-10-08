@@ -11,7 +11,7 @@ export const pineAsset = {
   units: 'meters',
   nominalTrunkHeight: 18,
   anchor: 'trunk base at local origin',
-  status: 'visual-reference',
-  lods: [],
-  performanceNote: 'Detailed near-view reference. Forest LOD and batching not yet supplied.'
+  status: 'forest-test',
+  lods: ['near-geometry', 'mid-cutout-shoots', 'far-cutout-clusters'],
+  performanceNote: 'Shared blueprint with approximate foliage LODs. Browser appearance and forest performance require validation.'
 } as const;
