@@ -1,1 +1,28 @@
-html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#181c20}#game{display:block;width:100%;height:100%;outline:none;touch-action:none}#hint{position:fixed;bottom:24px;left:0;right:0;text-align:center;color:white;font:14px system-ui;pointer-events:none;text-shadow:0 1px 4px black}
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #161b22;
+}
+
+#game {
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+  touch-action: none;
+}
+
+#hint {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  max-width: calc(100vw - 56px);
+  padding: 12px;
+  color: white;
+  background: #111c;
+  font: 14px system-ui;
+  pointer-events: none;
+}
