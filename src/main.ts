@@ -4,17 +4,24 @@ import {
   Color3,
   Color4,
   HemisphericLight,
+  Mesh,
   MeshBuilder,
   StandardMaterial,
   TransformNode,
   UniversalCamera,
   Vector3,
+  Matrix,
+  Skeleton,
+  Bone,
+  Space,
   Ray,
 } from '@babylonjs/core';
 
 import './style.css';
 
+// --------------------------------------------------
 // Engine and scene
+// --------------------------------------------------
 
 const canvas = document.querySelector<HTMLCanvasElement>('#game')!;
 const hint = document.getElementById('hint');
@@ -31,21 +38,51 @@ new HemisphericLight(
   scene
 );
 
-function createMaterial(name: string, color: Color3) {
-  const material = new StandardMaterial(name, scene);
+function material(name: string, color: Color3) {
+  const result = new StandardMaterial(name, scene);
 
-  material.diffuseColor = color;
-  material.specularColor = Color3.Black();
+  result.diffuseColor = color;
+  result.specularColor = Color3.Black();
 
-  return material;
+  return result;
 }
 
-// Test arena
-
-const concrete = createMaterial(
+const concrete = material(
   'concrete',
   new Color3(0.35, 0.39, 0.43)
 );
+
+const shirt = material(
+  'shirt',
+  new Color3(0.24, 0.45, 0.54)
+);
+
+const skin = material(
+  'skin',
+  new Color3(0.7, 0.51, 0.37)
+);
+
+const pants = material(
+  'pants',
+  new Color3(0.17, 0.21, 0.27)
+);
+
+const shoes = material(
+  'shoes',
+  new Color3(0.1, 0.12, 0.15)
+);
+
+const debugMaterial = material(
+  'skeleton-debug',
+  new Color3(1, 0.75, 0.15)
+);
+
+debugMaterial.emissiveColor = new Color3(1, 0.55, 0.05);
+debugMaterial.disableLighting = true;
+
+// --------------------------------------------------
+// Test arena
+// --------------------------------------------------
 
 const ground = MeshBuilder.CreateGround(
   'arena',
@@ -61,7 +98,6 @@ const obstacles = [
   { x: -5, z: 7, width: 4, height: 2, depth: 2 },
   { x: 0, z: 12, width: 8, height: 3, depth: 1 },
 
-  // Arena boundary walls
   { x: 30, z: 0, width: 1, height: 4, depth: 60 },
   { x: -30, z: 0, width: 1, height: 4, depth: 60 },
   { x: 0, z: 30, width: 60, height: 4, depth: 1 },
@@ -89,7 +125,9 @@ for (const obstacle of obstacles) {
   box.checkCollisions = true;
 }
 
-// Player collision body
+// --------------------------------------------------
+// Independent player collision body
+// --------------------------------------------------
 
 const body = MeshBuilder.CreateBox(
   'player-collider',
@@ -102,35 +140,149 @@ body.isPickable = false;
 body.ellipsoid.set(0.32, 0.9, 0.32);
 body.position.set(0, 0.92, 0);
 
-// Placeholder character
-
+// Visual motion does not change the collision body.
 const visual = new TransformNode('character-visual', scene);
 
-const shirt = createMaterial(
-  'shirt',
-  new Color3(0.24, 0.45, 0.54)
+// An empty mesh supplies the skeleton's world transform.
+const rigAnchor = new Mesh('rig-anchor', scene);
+rigAnchor.parent = visual;
+rigAnchor.isPickable = false;
+
+const skeleton = new Skeleton(
+  'humanoid-44',
+  'humanoid-44',
+  scene
 );
 
-const skin = createMaterial(
-  'skin',
-  new Color3(0.7, 0.51, 0.37)
-);
+const bones = new Map<string, Bone>();
+const links: { parent: Bone; child: Bone }[] = [];
 
-const pants = createMaterial(
-  'pants',
-  new Color3(0.17, 0.21, 0.27)
-);
-
-function createPart(
+function addBone(
   name: string,
+  parent: Bone | null,
+  x: number,
+  y: number,
+  z: number
+) {
+  const bone = new Bone(
+    name,
+    skeleton,
+    parent,
+    Matrix.Translation(x, y, z)
+  );
+
+  bones.set(name, bone);
+
+  if (parent) {
+    links.push({ parent, child: bone });
+  }
+
+  return bone;
+}
+
+// --------------------------------------------------
+// Body hierarchy: 24 bones
+// --------------------------------------------------
+
+const root = addBone('root', null, 0, 0, 0);
+const pelvis = addBone('pelvis', root, 0, 0.92, 0);
+
+const spine = addBone('spine', pelvis, 0, 0.16, 0);
+const chest = addBone('chest', spine, 0, 0.18, 0);
+const upperChest = addBone('upperChest', chest, 0, 0.18, 0);
+const neck = addBone('neck', upperChest, 0, 0.13, 0);
+const head = addBone('head', neck, 0, 0.12, 0);
+const jaw = addBone('jaw', head, 0, -0.06, 0.08);
+
+type SideRig = {
+  clavicle: Bone;
+  upperArm: Bone;
+  forearm: Bone;
+  hand: Bone;
+  thigh: Bone;
+  shin: Bone;
+  foot: Bone;
+  toe: Bone;
+};
+
+function createSide(name: string, sign: number): SideRig {
+  const clavicle = addBone(
+    `${name}Clavicle`,
+    upperChest,
+    sign * 0.12, 0, 0
+  );
+
+  const upperArm = addBone(
+    `${name}UpperArm`,
+    clavicle,
+    sign * 0.18, 0, 0
+  );
+
+  const forearm = addBone(
+    `${name}Forearm`,
+    upperArm,
+    0, -0.29, 0
+  );
+
+  const hand = addBone(
+    `${name}Hand`,
+    forearm,
+    0, -0.27, 0
+  );
+
+  const thigh = addBone(
+    `${name}Thigh`,
+    pelvis,
+    sign * 0.14, -0.05, 0
+  );
+
+  const shin = addBone(
+    `${name}Shin`,
+    thigh,
+    0, -0.4, 0
+  );
+
+  const foot = addBone(
+    `${name}Foot`,
+    shin,
+    0, -0.39, 0
+  );
+
+  const toe = addBone(
+    `${name}Toe`,
+    foot,
+    0, -0.035, 0.15
+  );
+
+  return {
+    clavicle,
+    upperArm,
+    forearm,
+    hand,
+    thigh,
+    shin,
+    foot,
+    toe,
+  };
+}
+
+const left = createSide('left', -1);
+const right = createSide('right', 1);
+
+// --------------------------------------------------
+// Rigid placeholder meshes attached to actual bones
+// --------------------------------------------------
+
+function segment(
+  name: string,
+  bone: Bone,
   width: number,
   height: number,
   depth: number,
   x: number,
   y: number,
   z: number,
-  material: StandardMaterial,
-  parent: TransformNode
+  mat: StandardMaterial
 ) {
   const mesh = MeshBuilder.CreateBox(
     name,
@@ -138,79 +290,287 @@ function createPart(
     scene
   );
 
-  mesh.position.set(x, y, z);
-  mesh.material = material;
-  mesh.parent = parent;
+  mesh.material = mat;
   mesh.isPickable = false;
+
+  mesh.attachToBone(bone, rigAnchor);
+  mesh.position.set(x, y, z);
 
   return mesh;
 }
 
-const torso = createPart(
-  'torso',
-  0.5, 0.65, 0.28,
-  0, 1.13, 0,
-  shirt,
-  visual
+segment(
+  'pelvis-mesh', pelvis,
+  0.36, 0.18, 0.24,
+  0, -0.02, 0,
+  pants
 );
 
-createPart(
-  'head',
-  0.28, 0.3, 0.28,
-  0, 1.62, 0,
-  skin,
-  visual
+segment(
+  'abdomen-mesh', spine,
+  0.35, 0.2, 0.24,
+  0, 0.04, 0,
+  shirt
 );
 
-// Marks the character's forward direction.
-createPart(
-  'nose',
-  0.07, 0.07, 0.08,
-  0, 1.6, 0.17,
-  skin,
-  visual
+segment(
+  'chest-mesh', chest,
+  0.46, 0.2, 0.27,
+  0, 0.04, 0,
+  shirt
 );
 
-function createLimb(
-  name: string,
-  x: number,
-  y: number,
-  length: number,
-  material: StandardMaterial
-) {
-  const pivot = new TransformNode(`${name}-pivot`, scene);
+segment(
+  'upper-chest-mesh', upperChest,
+  0.48, 0.14, 0.27,
+  0, 0.015, 0,
+  shirt
+);
 
-  pivot.parent = visual;
-  pivot.position.set(x, y, 0);
+segment(
+  'neck-mesh', neck,
+  0.12, 0.13, 0.12,
+  0, 0.02, 0,
+  skin
+);
 
-  createPart(
-    name,
-    0.16, length, 0.18,
-    0, -length / 2, 0,
-    material,
-    pivot
+segment(
+  'head-mesh', head,
+  0.25, 0.24, 0.24,
+  0, 0.045, 0,
+  skin
+);
+
+segment(
+  'nose', head,
+  0.06, 0.06, 0.07,
+  0, 0.03, 0.145,
+  skin
+);
+
+segment(
+  'jaw-mesh', jaw,
+  0.2, 0.07, 0.15,
+  0, -0.015, -0.015,
+  skin
+);
+
+function buildSideMeshes(name: string, rig: SideRig) {
+  segment(
+    `${name}-upper-arm`, rig.upperArm,
+    0.15, 0.29, 0.16,
+    0, -0.145, 0,
+    shirt
   );
 
-  return pivot;
+  segment(
+    `${name}-forearm`, rig.forearm,
+    0.12, 0.27, 0.13,
+    0, -0.135, 0,
+    skin
+  );
+
+  segment(
+    `${name}-palm`, rig.hand,
+    0.12, 0.12, 0.065,
+    0, -0.06, 0,
+    skin
+  );
+
+  segment(
+    `${name}-thigh`, rig.thigh,
+    0.18, 0.4, 0.2,
+    0, -0.2, 0,
+    pants
+  );
+
+  segment(
+    `${name}-shin`, rig.shin,
+    0.15, 0.39, 0.17,
+    0, -0.195, 0,
+    pants
+  );
+
+  segment(
+    `${name}-foot`, rig.foot,
+    0.17, 0.1, 0.2,
+    0, -0.025, 0.035,
+    shoes
+  );
+
+  segment(
+    `${name}-toe`, rig.toe,
+    0.17, 0.07, 0.1,
+    0, 0, 0.025,
+    shoes
+  );
 }
 
-const leftArm = createLimb(
-  'left-arm', -0.35, 1.42, 0.6, shirt
+buildSideMeshes('left', left);
+buildSideMeshes('right', right);
+
+// --------------------------------------------------
+// Fingers: 20 bones, two per finger
+// --------------------------------------------------
+
+function buildFingers(
+  side: string,
+  hand: Bone,
+  sign: number
+) {
+  const fingerNames = [
+    'thumb',
+    'index',
+    'middle',
+    'ring',
+    'little',
+  ];
+
+  fingerNames.forEach((name, index) => {
+    const thumb = index === 0;
+
+    const x = thumb
+      ? -sign * 0.075
+      : sign * (-0.043 + (index - 1) * 0.029);
+
+    const y = thumb ? -0.055 : -0.12;
+    const length = thumb
+      ? 0.045
+      : [0, 0.052, 0.058, 0.052, 0.042][index];
+
+    const proximal = addBone(
+      `${side}-${name}-proximal`,
+      hand,
+      x, y, 0
+    );
+
+    const distal = addBone(
+      `${side}-${name}-distal`,
+      proximal,
+      0, -length, 0
+    );
+
+    segment(
+      `${side}-${name}-proximal-mesh`,
+      proximal,
+      0.022, length, 0.025,
+      0, -length / 2, 0,
+      skin
+    );
+
+    segment(
+      `${side}-${name}-distal-mesh`,
+      distal,
+      0.02, length * 0.8, 0.023,
+      0, -length * 0.4, 0,
+      skin
+    );
+
+    proximal.setRotation(
+      new Vector3(
+        -0.12,
+        0,
+        thumb ? -sign * 0.5 : 0
+      ),
+      Space.LOCAL
+    );
+
+    distal.setRotation(
+      new Vector3(-0.2, 0, 0),
+      Space.LOCAL
+    );
+  });
+}
+
+buildFingers('left', left.hand, -1);
+buildFingers('right', right.hand, 1);
+
+console.assert(
+  skeleton.bones.length === 44,
+  `Expected 44 bones; found ${skeleton.bones.length}`
 );
 
-const rightArm = createLimb(
-  'right-arm', 0.35, 1.42, 0.6, shirt
+console.info('Character skeleton:', skeleton.bones.length, 'bones');
+
+// --------------------------------------------------
+// Optional joint and bone overlay
+// --------------------------------------------------
+
+let debugVisible = false;
+
+const jointMarkers = skeleton.bones.map((bone) => {
+  const marker = MeshBuilder.CreateSphere(
+    `${bone.name}-joint`,
+    { diameter: 0.025, segments: 4 },
+    scene
+  );
+
+  marker.material = debugMaterial;
+  marker.isPickable = false;
+  marker.renderingGroupId = 1;
+  marker.setEnabled(false);
+
+  return { bone, marker };
+});
+
+const debugLines = MeshBuilder.CreateLineSystem(
+  'skeleton-lines',
+  {
+    lines: links.map(() => [
+      Vector3.Zero(),
+      new Vector3(0, 0.001, 0),
+    ]),
+    updatable: true,
+  },
+  scene
 );
 
-const leftLeg = createLimb(
-  'left-leg', -0.15, 0.8, 0.8, pants
-);
+debugLines.color = new Color3(1, 0.75, 0.15);
+debugLines.isPickable = false;
+debugLines.renderingGroupId = 1;
+debugLines.setEnabled(false);
 
-const rightLeg = createLimb(
-  'right-leg', 0.15, 0.8, 0.8, pants
-);
+// Render the overlay without the body's depth occlusion.
+scene.setRenderingAutoClearDepthStencil(1, true, true, true);
 
-// Third-person camera
+function toggleSkeleton() {
+  debugVisible = !debugVisible;
+
+  debugLines.setEnabled(debugVisible);
+
+  for (const { marker } of jointMarkers) {
+    marker.setEnabled(debugVisible);
+  }
+}
+
+function updateSkeletonOverlay() {
+  if (!debugVisible) return;
+
+  rigAnchor.computeWorldMatrix(true);
+  skeleton.computeAbsoluteMatrices(true);
+
+  for (const { bone, marker } of jointMarkers) {
+    marker.position.copyFrom(
+      bone.getAbsolutePosition(rigAnchor)
+    );
+  }
+
+  MeshBuilder.CreateLineSystem(
+    'skeleton-lines',
+    {
+      lines: links.map(({ parent, child }) => [
+        parent.getAbsolutePosition(rigAnchor),
+        child.getAbsolutePosition(rigAnchor),
+      ]),
+      instance: debugLines,
+    },
+    scene
+  );
+}
+
+// --------------------------------------------------
+// Camera and input
+// --------------------------------------------------
 
 const camera = new UniversalCamera(
   'third-person',
@@ -221,8 +581,6 @@ const camera = new UniversalCamera(
 camera.inputs.clear();
 camera.minZ = 0.05;
 scene.activeCamera = camera;
-
-// Input and movement configuration
 
 const WALK_SPEED = 3;
 const SPRINT_SPEED = 6;
@@ -245,13 +603,11 @@ let yaw = 0;
 let pitch = 0.25;
 let verticalSpeed = 0;
 
-// Animation state
-
-let animationPhase = 0;
-let animationBlend = 0;
+let gaitPhase = 0;
+let movementBlend = 0;
 let sprintBlend = 0;
+let animationSpeed = 0;
 let idleTime = 0;
-let smoothedAnimationSpeed = 0;
 
 const active = () => document.pointerLockElement === canvas;
 const clearInput = () => keys.clear();
@@ -276,7 +632,17 @@ canvas.addEventListener('click', () => {
 });
 
 window.addEventListener('keydown', (event) => {
-  if (!active() || !movementKeys.has(event.code)) return;
+  if (!active()) return;
+
+  if (event.code === 'KeyB') {
+    event.preventDefault();
+
+    if (!event.repeat) toggleSkeleton();
+
+    return;
+  }
+
+  if (!movementKeys.has(event.code)) return;
 
   event.preventDefault();
   keys.add(event.code);
@@ -300,25 +666,192 @@ document.addEventListener('mousemove', (event) => {
   );
 });
 
-// Update loop
+// --------------------------------------------------
+// Animation
+// --------------------------------------------------
+
+function rotate(
+  bone: Bone,
+  x = 0,
+  y = 0,
+  z = 0
+) {
+  bone.setRotation(
+    new Vector3(x, y, z),
+    Space.LOCAL
+  );
+}
+
+function animateSide(
+  rig: SideRig,
+  phase: number,
+  sign: number
+) {
+  const stride = Math.sin(phase);
+
+  // Local +Z is forward; negative X swings a leg forward.
+  const hipSwing =
+    -stride *
+    (0.42 + sprintBlend * 0.28) *
+    movementBlend;
+
+  // Bend the knee during the forward recovery swing.
+  const kneeBend =
+    Math.max(0, stride) *
+    (0.55 + sprintBlend * 0.6) *
+    movementBlend;
+
+  rotate(rig.thigh, hipSwing);
+  rotate(rig.shin, kneeBend);
+
+  rotate(
+    rig.foot,
+    -hipSwing * 0.2 - kneeBend * 0.3
+  );
+
+  rotate(
+    rig.toe,
+    -Math.max(0, -stride) * 0.22 * movementBlend
+  );
+
+  rotate(
+    rig.clavicle,
+    0,
+    -stride * 0.035 * movementBlend,
+    0
+  );
+
+  // Arms counter-swing against the corresponding leg.
+  rotate(
+    rig.upperArm,
+    stride *
+      (0.3 + sprintBlend * 0.35) *
+      movementBlend,
+    0,
+    sign * (0.07 + sprintBlend * 0.04)
+  );
+
+  // Negative X bends the forearm forward.
+  rotate(
+    rig.forearm,
+    -0.12 -
+      sprintBlend * 0.85 -
+      Math.max(0, -stride) * 0.2 * movementBlend
+  );
+
+  rotate(rig.hand, -0.05 - sprintBlend * 0.08);
+}
+
+function animateCharacter(dt: number, actualSpeed: number) {
+  idleTime += dt;
+
+  const response = 1 - Math.exp(-12 * dt);
+  const poseResponse = 1 - Math.exp(-9 * dt);
+
+  animationSpeed +=
+    (actualSpeed - animationSpeed) * response;
+
+  const targetMovement = Math.min(
+    1,
+    Math.max(0, (actualSpeed - 0.05) / WALK_SPEED)
+  );
+
+  movementBlend +=
+    (targetMovement - movementBlend) * response;
+
+  const targetSprint = Math.min(
+    1,
+    Math.max(
+      0,
+      (actualSpeed - WALK_SPEED) /
+        (SPRINT_SPEED - WALK_SPEED)
+    )
+  );
+
+  sprintBlend +=
+    (targetSprint - sprintBlend) * poseResponse;
+
+  gaitPhase += animationSpeed * dt * 2.5;
+
+  const idleWeight = 1 - movementBlend;
+  const breathing = Math.sin(idleTime * 2.2);
+  const sway = Math.sin(gaitPhase);
+
+  rotate(
+    pelvis,
+    0,
+    sway * 0.035 * movementBlend,
+    sway * 0.015 * movementBlend
+  );
+
+  rotate(
+    spine,
+    0.035 * movementBlend + 0.09 * sprintBlend,
+    -sway * 0.025 * movementBlend,
+    0
+  );
+
+  rotate(
+    chest,
+    breathing * 0.012 * idleWeight +
+      sprintBlend * 0.035,
+    -sway * 0.035 * movementBlend,
+    0
+  );
+
+  rotate(
+    upperChest,
+    breathing * 0.008 * idleWeight,
+    0,
+    0
+  );
+
+  // Counter some torso lean to keep the head more upright.
+  rotate(neck, -sprintBlend * 0.045);
+  rotate(head, breathing * 0.006 * idleWeight);
+  rotate(jaw);
+
+  animateSide(left, gaitPhase, -1);
+  animateSide(right, gaitPhase + Math.PI, 1);
+
+  const bounce =
+    (1 - Math.cos(gaitPhase * 2)) * 0.5;
+
+  visual.position.set(
+    body.position.x,
+    body.position.y - 0.9 +
+      bounce *
+        (0.015 + sprintBlend * 0.025) *
+        movementBlend +
+      breathing * 0.003 * idleWeight,
+    body.position.z
+  );
+}
+
+// --------------------------------------------------
+// Frame update
+// --------------------------------------------------
 
 scene.onBeforeRenderObservable.add(() => {
-  const dt = Math.min(engine.getDeltaTime() / 1000, 0.033);
-
-  // Camera-relative movement input
+  const dt = Math.min(
+    engine.getDeltaTime() / 1000,
+    0.033
+  );
 
   const forward = active()
     ? Number(keys.has('KeyW')) - Number(keys.has('KeyS'))
     : 0;
 
-  const right = active()
+  const rightInput = active()
     ? Number(keys.has('KeyD')) - Number(keys.has('KeyA'))
     : 0;
 
   const direction = new Vector3(
-    Math.sin(yaw) * forward + Math.cos(yaw) * right,
+    Math.sin(yaw) * forward +
+      Math.cos(yaw) * rightInput,
     0,
-    Math.cos(yaw) * forward - Math.sin(yaw) * right
+    Math.cos(yaw) * forward -
+      Math.sin(yaw) * rightInput
   );
 
   if (direction.lengthSquared() > 0) {
@@ -331,8 +864,6 @@ scene.onBeforeRenderObservable.add(() => {
   const speed = sprinting ? SPRINT_SPEED : WALK_SPEED;
   const previousPosition = body.position.clone();
 
-  // Gravity and collision movement
-
   verticalSpeed -= GRAVITY * dt;
 
   body.moveWithCollisions(
@@ -343,7 +874,7 @@ scene.onBeforeRenderObservable.add(() => {
     )
   );
 
-  // Flat-arena ground safeguard.
+  // Flat-arena safeguard, not a general terrain controller.
   if (body.position.y < 0.9) {
     body.position.y = 0.9;
     verticalSpeed = 0;
@@ -362,10 +893,11 @@ scene.onBeforeRenderObservable.add(() => {
       body.position.z - previousPosition.z
     ) / Math.max(dt, 0.0001);
 
-  // Smooth character facing
-
   if (direction.lengthSquared() > 0) {
-    const targetYaw = Math.atan2(direction.x, direction.z);
+    const targetYaw = Math.atan2(
+      direction.x,
+      direction.z
+    );
 
     const difference = Math.atan2(
       Math.sin(targetYaw - visual.rotation.y),
@@ -376,113 +908,8 @@ scene.onBeforeRenderObservable.add(() => {
       difference * (1 - Math.exp(-14 * dt));
   }
 
-  // Procedural idle, walk, and sprint animation
-
-  idleTime += dt;
-
-  const movementResponse = 1 - Math.exp(-12 * dt);
-  const poseResponse = 1 - Math.exp(-9 * dt);
-
-  smoothedAnimationSpeed +=
-    (actualSpeed - smoothedAnimationSpeed) *
-    movementResponse;
-
-  const targetMovementBlend = Math.min(
-    1,
-    Math.max(0, (actualSpeed - 0.05) / WALK_SPEED)
-  );
-
-  animationBlend +=
-    (targetMovementBlend - animationBlend) *
-    movementResponse;
-
-  // Actual speed controls the sprint pose.
-  const targetSprintBlend = Math.min(
-    1,
-    Math.max(
-      0,
-      (actualSpeed - WALK_SPEED) /
-        (SPRINT_SPEED - WALK_SPEED)
-    )
-  );
-
-  sprintBlend +=
-    (targetSprintBlend - sprintBlend) *
-    poseResponse;
-
-  animationPhase +=
-    smoothedAnimationSpeed * dt * 2.5;
-
-  const idleWeight = 1 - animationBlend;
-  const stride = Math.sin(animationPhase);
-  const oppositeStride = -stride;
-
-  const bounce =
-    (1 - Math.cos(animationPhase * 2)) * 0.5;
-
-  const breathing = Math.sin(idleTime * 2.2);
-  const idleSway = Math.sin(idleTime * 1.4);
-
-  const legAmplitude = 0.48 + sprintBlend * 0.32;
-  const armAmplitude = 0.34 + sprintBlend * 0.38;
-
-  const idleArmMotion =
-    breathing * 0.018 * idleWeight;
-
-  leftLeg.rotation.x =
-    stride * legAmplitude * animationBlend;
-
-  rightLeg.rotation.x =
-    oppositeStride * legAmplitude * animationBlend;
-
-  leftArm.rotation.x =
-    oppositeStride * armAmplitude * animationBlend +
-    idleArmMotion;
-
-  rightArm.rotation.x =
-    stride * armAmplitude * animationBlend +
-    idleArmMotion;
-
-  leftArm.rotation.z =
-    -0.06 - sprintBlend * 0.05;
-
-  rightArm.rotation.z =
-    0.06 + sprintBlend * 0.05;
-
-  // Idle breathing affects the torso only.
-  torso.scaling.y =
-    1 + breathing * 0.012 * idleWeight;
-
-  // Local positive Z is the character's forward direction.
-  visual.rotation.x =
-    0.035 * animationBlend +
-    0.13 * sprintBlend;
-
-  visual.rotation.z =
-    idleSway * 0.008 * idleWeight +
-    stride * 0.018 * animationBlend;
-
-  const movementBob =
-    bounce *
-    (0.022 + sprintBlend * 0.025) *
-    animationBlend;
-
-  const idleBob =
-    breathing * 0.004 * idleWeight;
-
-  const sprintLowering = sprintBlend * 0.015;
-
-  // Animation offsets do not move the collision body.
-  visual.position.set(
-    body.position.x,
-    body.position.y - 0.9 +
-      movementBob +
-      idleBob -
-      sprintLowering,
-    body.position.z
-  );
-
-  // Third-person camera obstruction handling
+  animateCharacter(dt, actualSpeed);
+  updateSkeletonOverlay();
 
   const cameraTarget = body.position.add(
     new Vector3(0, 0.55, 0)
@@ -513,21 +940,20 @@ scene.onBeforeRenderObservable.add(() => {
 
   camera.setTarget(cameraTarget);
 
-  // Controls and animation state display
-
   if (hint) {
     const state =
-      actualSpeed > 0.1
-        ? sprinting ? 'Sprint' : 'Walk'
-        : 'Idle';
+      actualSpeed < 0.1
+        ? 'Idle'
+        : actualSpeed > WALK_SPEED + 0.3
+          ? 'Sprint'
+          : 'Walk';
 
     hint.textContent =
       'Click to play · WASD move · Shift sprint · ' +
-      `Mouse look · Esc release | ${state}`;
+      'Mouse look · B skeleton · Esc release | ' +
+      `${state} · ${skeleton.bones.length} bones`;
   }
 });
-
-// Rendering
 
 engine.runRenderLoop(() => scene.render());
 
