@@ -33,6 +33,7 @@ new HemisphericLight(
 
 function createMaterial(name: string, color: Color3) {
   const material = new StandardMaterial(name, scene);
+
   material.diffuseColor = color;
   material.specularColor = Color3.Black();
 
@@ -145,7 +146,7 @@ function createPart(
   return mesh;
 }
 
-createPart(
+const torso = createPart(
   'torso',
   0.5, 0.65, 0.28,
   0, 1.13, 0,
@@ -221,7 +222,7 @@ camera.inputs.clear();
 camera.minZ = 0.05;
 scene.activeCamera = camera;
 
-// Input and movement state
+// Input and movement configuration
 
 const WALK_SPEED = 3;
 const SPRINT_SPEED = 6;
@@ -231,11 +232,26 @@ const CAMERA_DISTANCE = 5;
 
 const keys = new Set<string>();
 
+const movementKeys = new Set([
+  'KeyW',
+  'KeyA',
+  'KeyS',
+  'KeyD',
+  'ShiftLeft',
+  'ShiftRight',
+]);
+
 let yaw = 0;
 let pitch = 0.25;
 let verticalSpeed = 0;
+
+// Animation state
+
 let animationPhase = 0;
 let animationBlend = 0;
+let sprintBlend = 0;
+let idleTime = 0;
+let smoothedAnimationSpeed = 0;
 
 const active = () => document.pointerLockElement === canvas;
 const clearInput = () => keys.clear();
@@ -258,15 +274,6 @@ canvas.addEventListener('click', () => {
     console.warn('Pointer lock failed:', error);
   }
 });
-
-const movementKeys = new Set([
-  'KeyW',
-  'KeyA',
-  'KeyS',
-  'KeyD',
-  'ShiftLeft',
-  'ShiftRight',
-]);
 
 window.addEventListener('keydown', (event) => {
   if (!active() || !movementKeys.has(event.code)) return;
@@ -298,6 +305,8 @@ document.addEventListener('mousemove', (event) => {
 scene.onBeforeRenderObservable.add(() => {
   const dt = Math.min(engine.getDeltaTime() / 1000, 0.033);
 
+  // Camera-relative movement input
+
   const forward = active()
     ? Number(keys.has('KeyW')) - Number(keys.has('KeyS'))
     : 0;
@@ -321,6 +330,8 @@ scene.onBeforeRenderObservable.add(() => {
 
   const speed = sprinting ? SPRINT_SPEED : WALK_SPEED;
   const previousPosition = body.position.clone();
+
+  // Gravity and collision movement
 
   verticalSpeed -= GRAVITY * dt;
 
@@ -351,7 +362,8 @@ scene.onBeforeRenderObservable.add(() => {
       body.position.z - previousPosition.z
     ) / Math.max(dt, 0.0001);
 
-  // Smooth character facing.
+  // Smooth character facing
+
   if (direction.lengthSquared() > 0) {
     const targetYaw = Math.atan2(direction.x, direction.z);
 
@@ -364,30 +376,114 @@ scene.onBeforeRenderObservable.add(() => {
       difference * (1 - Math.exp(-14 * dt));
   }
 
-  // Procedural placeholder locomotion animation.
-  const targetBlend = Math.min(1, actualSpeed / WALK_SPEED);
+  // Procedural idle, walk, and sprint animation
+
+  idleTime += dt;
+
+  const movementResponse = 1 - Math.exp(-12 * dt);
+  const poseResponse = 1 - Math.exp(-9 * dt);
+
+  smoothedAnimationSpeed +=
+    (actualSpeed - smoothedAnimationSpeed) *
+    movementResponse;
+
+  const targetMovementBlend = Math.min(
+    1,
+    Math.max(0, (actualSpeed - 0.05) / WALK_SPEED)
+  );
 
   animationBlend +=
-    (targetBlend - animationBlend) *
-    (1 - Math.exp(-12 * dt));
+    (targetMovementBlend - animationBlend) *
+    movementResponse;
 
-  animationPhase += actualSpeed * dt * 2.5;
+  // Actual speed controls the sprint pose.
+  const targetSprintBlend = Math.min(
+    1,
+    Math.max(
+      0,
+      (actualSpeed - WALK_SPEED) /
+        (SPRINT_SPEED - WALK_SPEED)
+    )
+  );
 
-  const swing =
-    Math.sin(animationPhase) * 0.65 * animationBlend;
+  sprintBlend +=
+    (targetSprintBlend - sprintBlend) *
+    poseResponse;
 
-  leftLeg.rotation.x = swing;
-  rightLeg.rotation.x = -swing;
-  leftArm.rotation.x = -swing * 0.8;
-  rightArm.rotation.x = swing * 0.8;
+  animationPhase +=
+    smoothedAnimationSpeed * dt * 2.5;
 
+  const idleWeight = 1 - animationBlend;
+  const stride = Math.sin(animationPhase);
+  const oppositeStride = -stride;
+
+  const bounce =
+    (1 - Math.cos(animationPhase * 2)) * 0.5;
+
+  const breathing = Math.sin(idleTime * 2.2);
+  const idleSway = Math.sin(idleTime * 1.4);
+
+  const legAmplitude = 0.48 + sprintBlend * 0.32;
+  const armAmplitude = 0.34 + sprintBlend * 0.38;
+
+  const idleArmMotion =
+    breathing * 0.018 * idleWeight;
+
+  leftLeg.rotation.x =
+    stride * legAmplitude * animationBlend;
+
+  rightLeg.rotation.x =
+    oppositeStride * legAmplitude * animationBlend;
+
+  leftArm.rotation.x =
+    oppositeStride * armAmplitude * animationBlend +
+    idleArmMotion;
+
+  rightArm.rotation.x =
+    stride * armAmplitude * animationBlend +
+    idleArmMotion;
+
+  leftArm.rotation.z =
+    -0.06 - sprintBlend * 0.05;
+
+  rightArm.rotation.z =
+    0.06 + sprintBlend * 0.05;
+
+  // Idle breathing affects the torso only.
+  torso.scaling.y =
+    1 + breathing * 0.012 * idleWeight;
+
+  // Local positive Z is the character's forward direction.
+  visual.rotation.x =
+    0.035 * animationBlend +
+    0.13 * sprintBlend;
+
+  visual.rotation.z =
+    idleSway * 0.008 * idleWeight +
+    stride * 0.018 * animationBlend;
+
+  const movementBob =
+    bounce *
+    (0.022 + sprintBlend * 0.025) *
+    animationBlend;
+
+  const idleBob =
+    breathing * 0.004 * idleWeight;
+
+  const sprintLowering = sprintBlend * 0.015;
+
+  // Animation offsets do not move the collision body.
   visual.position.set(
     body.position.x,
-    body.position.y - 0.9,
+    body.position.y - 0.9 +
+      movementBob +
+      idleBob -
+      sprintLowering,
     body.position.z
   );
 
-  // Pull the camera inward when geometry obstructs it.
+  // Third-person camera obstruction handling
+
   const cameraTarget = body.position.add(
     new Vector3(0, 0.55, 0)
   );
@@ -417,6 +513,8 @@ scene.onBeforeRenderObservable.add(() => {
 
   camera.setTarget(cameraTarget);
 
+  // Controls and animation state display
+
   if (hint) {
     const state =
       actualSpeed > 0.1
@@ -428,6 +526,8 @@ scene.onBeforeRenderObservable.add(() => {
       `Mouse look · Esc release | ${state}`;
   }
 });
+
+// Rendering
 
 engine.runRenderLoop(() => scene.render());
 
