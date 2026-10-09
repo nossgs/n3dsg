@@ -126,7 +126,7 @@ for (const obstacle of obstacles) {
 }
 
 // --------------------------------------------------
-// Independent player collision body
+// Player collision body and visual root
 // --------------------------------------------------
 
 const body = MeshBuilder.CreateBox(
@@ -140,13 +140,16 @@ body.isPickable = false;
 body.ellipsoid.set(0.32, 0.9, 0.32);
 body.position.set(0, 0.92, 0);
 
-// Visual motion does not change the collision body.
 const visual = new TransformNode('character-visual', scene);
 
-// An empty mesh supplies the skeleton's world transform.
+// Supplies the world transform for bone attachments.
 const rigAnchor = new Mesh('rig-anchor', scene);
 rigAnchor.parent = visual;
 rigAnchor.isPickable = false;
+
+// --------------------------------------------------
+// Skeleton
+// --------------------------------------------------
 
 const skeleton = new Skeleton(
   'humanoid-44',
@@ -154,7 +157,6 @@ const skeleton = new Skeleton(
   scene
 );
 
-const bones = new Map<string, Bone>();
 const links: { parent: Bone; child: Bone }[] = [];
 
 function addBone(
@@ -171,8 +173,6 @@ function addBone(
     Matrix.Translation(x, y, z)
   );
 
-  bones.set(name, bone);
-
   if (parent) {
     links.push({ parent, child: bone });
   }
@@ -180,9 +180,7 @@ function addBone(
   return bone;
 }
 
-// --------------------------------------------------
-// Body hierarchy: 24 bones
-// --------------------------------------------------
+// Central body: 8 bones.
 
 const root = addBone('root', null, 0, 0, 0);
 const pelvis = addBone('pelvis', root, 0, 0.92, 0);
@@ -209,49 +207,65 @@ function createSide(name: string, sign: number): SideRig {
   const clavicle = addBone(
     `${name}Clavicle`,
     upperChest,
-    sign * 0.12, 0, 0
+    sign * 0.12,
+    0,
+    0
   );
 
   const upperArm = addBone(
     `${name}UpperArm`,
     clavicle,
-    sign * 0.18, 0, 0
+    sign * 0.18,
+    0,
+    0
   );
 
   const forearm = addBone(
     `${name}Forearm`,
     upperArm,
-    0, -0.29, 0
+    0,
+    -0.29,
+    0
   );
 
   const hand = addBone(
     `${name}Hand`,
     forearm,
-    0, -0.27, 0
+    0,
+    -0.27,
+    0
   );
 
   const thigh = addBone(
     `${name}Thigh`,
     pelvis,
-    sign * 0.14, -0.05, 0
+    sign * 0.14,
+    -0.05,
+    0
   );
 
   const shin = addBone(
     `${name}Shin`,
     thigh,
-    0, -0.4, 0
+    0,
+    -0.4,
+    0
   );
 
   const foot = addBone(
     `${name}Foot`,
     shin,
-    0, -0.39, 0
+    0,
+    -0.39,
+    0
   );
 
   const toe = addBone(
     `${name}Toe`,
     foot,
-    0, -0.035, 0.15
+    0,
+    -0.035,
+    0.15
   );
 
   return {
@@ -270,7 +284,7 @@ const left = createSide('left', -1);
 const right = createSide('right', 1);
 
 // --------------------------------------------------
-// Rigid placeholder meshes attached to actual bones
+// Rounded rigid geometry attached to bones
 // --------------------------------------------------
 
 function segment(
@@ -284,11 +298,102 @@ function segment(
   z: number,
   mat: StandardMaterial
 ) {
-  const mesh = MeshBuilder.CreateBox(
-    name,
-    { width, height, depth },
-    scene
-  );
+  const isFinger =
+    name.includes('-proximal-mesh') ||
+    name.includes('-distal-mesh');
+
+  const isLimb =
+    name.includes('-upper-arm') ||
+    name.includes('-forearm') ||
+    name.includes('-thigh') ||
+    name.includes('-shin');
+
+  const isTorso =
+    name === 'pelvis-mesh' ||
+    name === 'abdomen-mesh' ||
+    name === 'chest-mesh' ||
+    name === 'upper-chest-mesh';
+
+  const isFoot =
+    name.endsWith('-foot') ||
+    name.endsWith('-toe');
+
+  let mesh: Mesh;
+
+  if (isLimb || isFinger) {
+    const diameter = Math.min(width, height * 0.8);
+
+    mesh = MeshBuilder.CreateCapsule(
+      name,
+      {
+        height,
+        radius: diameter / 2,
+        tessellation: isFinger ? 8 : 12,
+        subdivisions: 2,
+        capSubdivisions: 4,
+      },
+      scene
+    );
+
+    mesh.scaling.set(
+      width / diameter,
+      1,
+      depth / diameter
+    );
+  } else if (isTorso) {
+    const profiles: Record<
+      string,
+      { top: number; bottom: number }
+    > = {
+      'pelvis-mesh': {
+        top: width * 0.88,
+        bottom: width,
+      },
+      'abdomen-mesh': {
+        top: width * 1.03,
+        bottom: width * 0.85,
+      },
+      'chest-mesh': {
+        top: width,
+        bottom: width * 0.78,
+      },
+      'upper-chest-mesh': {
+        top: width * 0.82,
+        bottom: width,
+      },
+    };
+
+    const profile = profiles[name];
+
+    mesh = MeshBuilder.CreateCylinder(
+      name,
+      {
+        height,
+        diameterTop: profile.top,
+        diameterBottom: profile.bottom,
+        tessellation: 20,
+        subdivisions: 1,
+      },
+      scene
+    );
+
+    mesh.scaling.z = depth / width;
+  } else {
+    mesh = MeshBuilder.CreateSphere(
+      name,
+      {
+        diameter: 1,
+        segments: isFoot ? 12 : 16,
+      },
+      scene
+    );
+
+    mesh.scaling.set(width, height, depth);
+
+    if (name === 'head-mesh') {
+      mesh.scaling.y = height * 1.12;
+    }
+  }
 
   mesh.material = mat;
   mesh.isPickable = false;
@@ -296,110 +401,152 @@ function segment(
   mesh.attachToBone(bone, rigAnchor);
   mesh.position.set(x, y, z);
 
+  if (isLimb) {
+    const joint = MeshBuilder.CreateSphere(
+      `${name}-joint-cover`,
+      {
+        diameter: 1,
+        segments: 12,
+      },
+      scene
+    );
+
+    joint.scaling.set(
+      width * 0.95,
+      width * 0.95,
+      depth * 0.95
+    );
+
+    joint.material = mat;
+    joint.isPickable = false;
+
+    joint.attachToBone(bone, rigAnchor);
+    joint.position.set(0, 0, 0);
+  }
+
   return mesh;
 }
 
+// Torso and head.
+
 segment(
-  'pelvis-mesh', pelvis,
+  'pelvis-mesh',
+  pelvis,
   0.36, 0.18, 0.24,
   0, -0.02, 0,
   pants
 );
 
 segment(
-  'abdomen-mesh', spine,
+  'abdomen-mesh',
+  spine,
   0.35, 0.2, 0.24,
   0, 0.04, 0,
   shirt
 );
 
 segment(
-  'chest-mesh', chest,
+  'chest-mesh',
+  chest,
   0.46, 0.2, 0.27,
   0, 0.04, 0,
   shirt
 );
 
 segment(
-  'upper-chest-mesh', upperChest,
+  'upper-chest-mesh',
+  upperChest,
   0.48, 0.14, 0.27,
   0, 0.015, 0,
   shirt
 );
 
 segment(
-  'neck-mesh', neck,
+  'neck-mesh',
+  neck,
   0.12, 0.13, 0.12,
   0, 0.02, 0,
   skin
 );
 
 segment(
-  'head-mesh', head,
+  'head-mesh',
+  head,
   0.25, 0.24, 0.24,
   0, 0.045, 0,
   skin
 );
 
 segment(
-  'nose', head,
+  'nose',
+  head,
   0.06, 0.06, 0.07,
   0, 0.03, 0.145,
   skin
 );
 
 segment(
-  'jaw-mesh', jaw,
+  'jaw-mesh',
+  jaw,
   0.2, 0.07, 0.15,
   0, -0.015, -0.015,
   skin
 );
 
+// Arms and legs.
+
 function buildSideMeshes(name: string, rig: SideRig) {
   segment(
-    `${name}-upper-arm`, rig.upperArm,
+    `${name}-upper-arm`,
+    rig.upperArm,
     0.15, 0.29, 0.16,
     0, -0.145, 0,
     shirt
   );
 
   segment(
-    `${name}-forearm`, rig.forearm,
+    `${name}-forearm`,
+    rig.forearm,
     0.12, 0.27, 0.13,
     0, -0.135, 0,
     skin
   );
 
   segment(
-    `${name}-palm`, rig.hand,
+    `${name}-palm`,
+    rig.hand,
     0.12, 0.12, 0.065,
     0, -0.06, 0,
     skin
   );
 
   segment(
-    `${name}-thigh`, rig.thigh,
+    `${name}-thigh`,
+    rig.thigh,
     0.18, 0.4, 0.2,
     0, -0.2, 0,
     pants
   );
 
   segment(
-    `${name}-shin`, rig.shin,
+    `${name}-shin`,
+    rig.shin,
     0.15, 0.39, 0.17,
     0, -0.195, 0,
     pants
   );
 
   segment(
-    `${name}-foot`, rig.foot,
+    `${name}-foot`,
+    rig.foot,
     0.17, 0.1, 0.2,
     0, -0.025, 0.035,
     shoes
   );
 
   segment(
-    `${name}-toe`, rig.toe,
+    `${name}-toe`,
+    rig.toe,
     0.17, 0.07, 0.1,
     0, 0, 0.025,
     shoes
@@ -410,7 +557,7 @@ buildSideMeshes('left', left);
 buildSideMeshes('right', right);
 
 // --------------------------------------------------
-// Fingers: 20 bones, two per finger
+// Fingers: 20 bones
 // --------------------------------------------------
 
 function buildFingers(
@@ -426,6 +573,14 @@ function buildFingers(
     'little',
   ];
 
+  const fingerLengths = [
+    0.045,
+    0.052,
+    0.058,
+    0.052,
+    0.042,
+  ];
+
   fingerNames.forEach((name, index) => {
     const thumb = index === 0;
 
@@ -434,20 +589,22 @@ function buildFingers(
       : sign * (-0.043 + (index - 1) * 0.029);
 
     const y = thumb ? -0.055 : -0.12;
-    const length = thumb
-      ? 0.045
-      : [0, 0.052, 0.058, 0.052, 0.042][index];
+    const length = fingerLengths[index];
 
     const proximal = addBone(
       `${side}-${name}-proximal`,
       hand,
-      x, y, 0
+      x,
+      y,
+      0
     );
 
     const distal = addBone(
       `${side}-${name}-distal`,
       proximal,
-      0, -length, 0
+      0,
+      -length,
+      0
     );
 
     segment(
@@ -490,10 +647,14 @@ console.assert(
   `Expected 44 bones; found ${skeleton.bones.length}`
 );
 
-console.info('Character skeleton:', skeleton.bones.length, 'bones');
+console.info(
+  'Character skeleton:',
+  skeleton.bones.length,
+  'bones'
+);
 
 // --------------------------------------------------
-// Optional joint and bone overlay
+// Skeleton overlay
 // --------------------------------------------------
 
 let debugVisible = false;
@@ -501,7 +662,10 @@ let debugVisible = false;
 const jointMarkers = skeleton.bones.map((bone) => {
   const marker = MeshBuilder.CreateSphere(
     `${bone.name}-joint`,
-    { diameter: 0.025, segments: 4 },
+    {
+      diameter: 0.025,
+      segments: 4,
+    },
     scene
   );
 
@@ -530,8 +694,12 @@ debugLines.isPickable = false;
 debugLines.renderingGroupId = 1;
 debugLines.setEnabled(false);
 
-// Render the overlay without the body's depth occlusion.
-scene.setRenderingAutoClearDepthStencil(1, true, true, true);
+scene.setRenderingAutoClearDepthStencil(
+  1,
+  true,
+  true,
+  true
+);
 
 function toggleSkeleton() {
   debugVisible = !debugVisible;
@@ -569,7 +737,7 @@ function updateSkeletonOverlay() {
 }
 
 // --------------------------------------------------
-// Camera and input
+// Camera and movement configuration
 // --------------------------------------------------
 
 const camera = new UniversalCamera(
@@ -603,11 +771,16 @@ let yaw = 0;
 let pitch = 0.25;
 let verticalSpeed = 0;
 
+// Animation state.
+
 let gaitPhase = 0;
 let movementBlend = 0;
 let sprintBlend = 0;
-let animationSpeed = 0;
 let idleTime = 0;
+
+// --------------------------------------------------
+// Input
+// --------------------------------------------------
 
 const active = () => document.pointerLockElement === canvas;
 const clearInput = () => keys.clear();
@@ -637,7 +810,9 @@ window.addEventListener('keydown', (event) => {
   if (event.code === 'KeyB') {
     event.preventDefault();
 
-    if (!event.repeat) toggleSkeleton();
+    if (!event.repeat) {
+      toggleSkeleton();
+    }
 
     return;
   }
@@ -667,7 +842,7 @@ document.addEventListener('mousemove', (event) => {
 });
 
 // --------------------------------------------------
-// Animation
+// Bone animation
 // --------------------------------------------------
 
 function rotate(
@@ -689,67 +864,91 @@ function animateSide(
 ) {
   const stride = Math.sin(phase);
 
-  // Local +Z is forward; negative X swings a leg forward.
+  const forwardSwing = Math.max(0, stride);
+  const backwardSwing = Math.max(0, -stride);
+
+  const hipAmplitude =
+    0.32 + sprintBlend * 0.2;
+
   const hipSwing =
-    -stride *
-    (0.42 + sprintBlend * 0.28) *
-    movementBlend;
+    -stride * hipAmplitude * movementBlend;
 
-  // Bend the knee during the forward recovery swing.
   const kneeBend =
-    Math.max(0, stride) *
-    (0.55 + sprintBlend * 0.6) *
-    movementBlend;
+    0.045 +
+    forwardSwing *
+      (0.48 + sprintBlend * 0.5) *
+      movementBlend;
 
-  rotate(rig.thigh, hipSwing);
+  rotate(
+    rig.thigh,
+    hipSwing,
+    0,
+    sign * 0.012
+  );
+
   rotate(rig.shin, kneeBend);
+
+  const ankleCompensation =
+    -(hipSwing + kneeBend);
+
+  const toeOff =
+    backwardSwing *
+    (0.12 + sprintBlend * 0.1) *
+    movementBlend;
 
   rotate(
     rig.foot,
-    -hipSwing * 0.2 - kneeBend * 0.3
+    ankleCompensation + toeOff
   );
 
   rotate(
     rig.toe,
-    -Math.max(0, -stride) * 0.22 * movementBlend
+    -backwardSwing * 0.16 * movementBlend
   );
 
   rotate(
     rig.clavicle,
     0,
-    -stride * 0.035 * movementBlend,
+    -stride * 0.025 * movementBlend,
     0
   );
 
-  // Arms counter-swing against the corresponding leg.
+  const armSwing =
+    stride *
+    (0.24 + sprintBlend * 0.28) *
+    movementBlend;
+
   rotate(
     rig.upperArm,
-    stride *
-      (0.3 + sprintBlend * 0.35) *
-      movementBlend,
+    armSwing - sprintBlend * 0.08,
     0,
-    sign * (0.07 + sprintBlend * 0.04)
+    sign * (0.06 + sprintBlend * 0.03)
   );
 
-  // Negative X bends the forearm forward.
+  const elbowBend =
+    0.16 +
+    movementBlend * 0.08 +
+    sprintBlend * 0.65 +
+    backwardSwing * 0.12 * movementBlend;
+
+  rotate(rig.forearm, -elbowBend);
+
   rotate(
-    rig.forearm,
-    -0.12 -
-      sprintBlend * 0.85 -
-      Math.max(0, -stride) * 0.2 * movementBlend
+    rig.hand,
+    -0.025 - sprintBlend * 0.045,
+    0,
+    -sign * 0.025
   );
-
-  rotate(rig.hand, -0.05 - sprintBlend * 0.08);
 }
 
-function animateCharacter(dt: number, actualSpeed: number) {
+function animateCharacter(
+  dt: number,
+  actualSpeed: number
+) {
   idleTime += dt;
 
   const response = 1 - Math.exp(-12 * dt);
   const poseResponse = 1 - Math.exp(-9 * dt);
-
-  animationSpeed +=
-    (actualSpeed - animationSpeed) * response;
 
   const targetMovement = Math.min(
     1,
@@ -771,7 +970,8 @@ function animateCharacter(dt: number, actualSpeed: number) {
   sprintBlend +=
     (targetSprint - sprintBlend) * poseResponse;
 
-  gaitPhase += animationSpeed * dt * 2.5;
+  // Actual displacement drives the gait clock.
+  gaitPhase += actualSpeed * dt * 3.1;
 
   const idleWeight = 1 - movementBlend;
   const breathing = Math.sin(idleTime * 2.2);
@@ -806,7 +1006,6 @@ function animateCharacter(dt: number, actualSpeed: number) {
     0
   );
 
-  // Counter some torso lean to keep the head more upright.
   rotate(neck, -sprintBlend * 0.045);
   rotate(head, breathing * 0.006 * idleWeight);
   rotate(jaw);
@@ -819,9 +1018,9 @@ function animateCharacter(dt: number, actualSpeed: number) {
 
   visual.position.set(
     body.position.x,
-    body.position.y - 0.9 +
+    body.position.y - 0.9 - 0.008 +
       bounce *
-        (0.015 + sprintBlend * 0.025) *
+        (0.008 + sprintBlend * 0.012) *
         movementBlend +
       breathing * 0.003 * idleWeight,
     body.position.z
@@ -874,7 +1073,7 @@ scene.onBeforeRenderObservable.add(() => {
     )
   );
 
-  // Flat-arena safeguard, not a general terrain controller.
+  // Flat-arena safeguard.
   if (body.position.y < 0.9) {
     body.position.y = 0.9;
     verticalSpeed = 0;
@@ -893,6 +1092,7 @@ scene.onBeforeRenderObservable.add(() => {
       body.position.z - previousPosition.z
     ) / Math.max(dt, 0.0001);
 
+  // Smoothly face the intended movement direction.
   if (direction.lengthSquared() > 0) {
     const targetYaw = Math.atan2(
       direction.x,
@@ -911,6 +1111,7 @@ scene.onBeforeRenderObservable.add(() => {
   animateCharacter(dt, actualSpeed);
   updateSkeletonOverlay();
 
+  // Third-person camera obstruction handling.
   const cameraTarget = body.position.add(
     new Vector3(0, 0.55, 0)
   );
@@ -954,6 +1155,10 @@ scene.onBeforeRenderObservable.add(() => {
       `${state} · ${skeleton.bones.length} bones`;
   }
 });
+
+// --------------------------------------------------
+// Rendering
+// --------------------------------------------------
 
 engine.runRenderLoop(() => scene.render());
 
